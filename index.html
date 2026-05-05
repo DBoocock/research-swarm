@@ -1495,10 +1495,11 @@ function acceptRec(i){
 // ══════════════════════════════════════════════════════════
 function parseSynthesis(text){
   // Research map — accumulate, deduplicate
+  // Strip leading asterisks/bold markdown the model adds before titles
   let mapCount=0;
   for(const m of text.matchAll(/\[(?:DEEP|SHALLOW)[+](?:TRACTABLE|BLOCKED)\][^\n]*/g)){
     const line=m[0];
-    const title=line.replace(/\[.*?\]/g,'').replace(/^[-–•\d.]+\s*/,'').trim();
+    const title=line.replace(/\[.*?\]/g,'').replace(/^[\s\-–•\d.*]+/,'').trim();
     const cat=line.match(/\[(.*?)\]/)?.[1]||'';
     if(title&&!S.researchMap.find(r=>r.title===title)){
       S.researchMap.push({title,category:cat,round:S.currentRound,tag:null});mapCount++;
@@ -1506,17 +1507,22 @@ function parseSynthesis(text){
   }
   rebuildMap();tc('map',S.researchMap.length);
 
-  // Contradictions — accumulate
-  for(const m of (text.match(/CONTRADICTIONS[\s\S]*$/i)?.[0]||text).matchAll(/([A-Z][^:]+) vs ([^:]+):\s*([^|]+)\|\s*([^|]+)\|\s*Resolution needed:\s*([^\n]+)/g)){
-    const e={a1:m[1].trim(),a2:m[2].trim(),claim1:m[3].trim(),claim2:m[4].trim(),resolution:m[5].trim(),round:S.currentRound};
+  // Contradictions — handle both plain and bold markdown formats:
+  // "AGENT vs AGENT: ..." and "**AGENT vs. AGENT:**  ..."
+  const contraText=(text.match(/CONTRADICTIONS[\s\S]*$/i)?.[0]||text);
+  const contraPattern=/\*{0,2}([^*\n|]+?)\s+vs\.?\s+([^*:\n|]+?)\*{0,2}\s*:\s*([^|\n]+)\|\s*([^|\n]+)\|\s*Resolution needed:\s*([^\n]+)/gi;
+  for(const m of contraText.matchAll(contraPattern)){
+    const a1=m[1].replace(/\*/g,'').trim();
+    const a2=m[2].replace(/\*/g,'').trim();
+    const e={a1,a2,claim1:m[3].trim(),claim2:m[4].trim(),resolution:m[5].trim(),round:S.currentRound};
     if(!S.contradictions.find(c=>c.claim1===e.claim1))S.contradictions.push(e);
   }
   rebuildContradictions();tc('contra',S.contradictions.length||'!');
 
-  // Matrix
+  // Matrix — strip leading asterisks from titles
   const dt=[],db=[],st=[],sb=[];
   for(const m of text.matchAll(/\[(DEEP|SHALLOW)\+(TRACTABLE|BLOCKED)\]\s*([^\n]+)/g)){
-    const t=m[3].replace(/^[-–•\d.]+\s*/,'').trim();
+    const t=m[3].replace(/^[\s\-–•\d.*]+/,'').trim();
     if(m[1]==='DEEP'&&m[2]==='TRACTABLE')dt.push(t);
     else if(m[1]==='DEEP'&&m[2]==='BLOCKED')db.push(t);
     else if(m[1]==='SHALLOW'&&m[2]==='TRACTABLE')st.push(t);
@@ -1628,8 +1634,13 @@ function renderOverlapMatrix(){
 // SESSION LOG + EXPORT
 // ══════════════════════════════════════════════════════════
 function saveRound(){
+  // Use S.rounds.length+1 as the sequence number so each saved record gets a
+  // unique incrementing label regardless of how many synthesis calls happen
+  // per generation round (generation synthesis + debate synthesis both call
+  // saveRound with the same S.currentRound value, causing duplicate labels).
+  const seqNum = S.rounds.length + 1;
   S.rounds.push({
-    round:S.currentRound,ts:new Date().toISOString(),depth:S.depth,
+    round:seqNum,ts:new Date().toISOString(),depth:S.depth,
     generationOutputs:{...S.currentGen},debateOutputs:{...S.currentDebate},
     synthesis:S.currentSynthesis,pairingProposals:[...S.pairingProposals],
     retirementProposals:[...S.retirementProposals]
