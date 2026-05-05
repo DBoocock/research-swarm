@@ -11,3 +11,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Output
+output/
+
+# Docs
+docs/
