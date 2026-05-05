@@ -682,13 +682,13 @@ function renderCost(){
 
 // Max tokens per call type — synthesis produces long structured output and needs more room
 const MAX_TOKENS={
-  synthesis:  4000,
-  meta:       2000,
+  synthesis:  1200, // tightly constrained prompt: ~330 words structured output
+  meta:       1500,
   roster:     3000,
   generation: 1200,
   debate:     1200,
   compression: 600,
-  mandate:     800,
+  mandate:     600, // rewriting existing mandate, keep concise
 };
 
 function resolveModel(role){
@@ -933,15 +933,44 @@ async function runGen(){
   if(S.running)return;
   const activeAgents=agents.filter(a=>S.selectedAgents.has(a.id)&&S.agentStatuses[a.id]!=='retired'&&S.agentStatuses[a.id]!=='genonly');
   const genOnlyAgents=agents.filter(a=>S.selectedAgents.has(a.id)&&S.agentStatuses[a.id]==='genonly');
-  const allGenAgents=[...activeAgents,...genOnlyAgents];
-  if(!allGenAgents.length){setStatus('Select at least one agent.');return;}
+  const allCandidates=[...activeAgents,...genOnlyAgents];
+  if(!allCandidates.length){setStatus('Select at least one agent.');return;}
   if(!document.getElementById('api-key').value.trim()){setStatus('Enter your API key first.');return;}
-  S.running=true;S.currentRound++;S.currentGen={};S.currentDebate={};
+
+  // After the first round, only run agents with no existing generation output.
+  // This means newly added agents get their initial output without re-running
+  // agents who have already contributed — preserving existing outputs and saving cost.
+  const isFirstRound = S.currentRound === 0;
+  const allGenAgents = isFirstRound
+    ? allCandidates
+    : allCandidates.filter(a => !S.currentGen[a.id]);
+
+  if(!allGenAgents.length){
+    // All agents already have generation outputs — go straight to debate
+    setStatus('All agents already have generation outputs. Launch debate from the Next Round tab.');
+    return;
+  }
+
+  const runningAll = allGenAgents.length === allCandidates.length;
+  S.running=true;
+  if(isFirstRound) S.currentRound++;
+  // Don't clear S.currentGen — preserve existing outputs for agents not in this run
+  if(isFirstRound){ S.currentGen={}; S.currentDebate={}; }
   document.getElementById('run-btn').disabled=true;
-  const panel=document.getElementById('panel-gen');panel.innerHTML='';
-  const hdr=makeRoundHdr(`Round ${S.currentRound} — Generation`,'running');
+  const panel=document.getElementById('panel-gen');
+  // On subsequent rounds, add new agent cards without clearing existing ones
+  if(isFirstRound) panel.innerHTML='';
+  const hdr=makeRoundHdr(
+    isFirstRound
+      ? `Round ${S.currentRound} — Generation`
+      : `Round ${S.currentRound} — New agent generation (${allGenAgents.length} agent${allGenAgents.length>1?'s':''})`,
+    'running'
+  );
   panel.appendChild(hdr);
-  switchTab('gen');setStatus(`Round ${S.currentRound} — ${allGenAgents.length} agents in parallel...`);
+  switchTab('gen');
+  setStatus(isFirstRound
+    ? `Round ${S.currentRound} — ${allGenAgents.length} agents in parallel...`
+    : `Generating ${allGenAgents.length} new agent${allGenAgents.length>1?'s':''} — existing outputs preserved...`);
   const cards={},bodyEls={};
   allGenAgents.forEach(agent=>{
     const card=makeResultCard(agent.name,agent.color,'running');
@@ -1133,24 +1162,26 @@ async function runSynthesis(includeDebate){
 
   const synthPrompt=`You have received outputs from a multi-agent theoretical research swarm. All outputs:\n${allOutputs}
 
-Write a rigorous synthesis (~400 words) with these exact sections:
+Write a concise synthesis using these exact sections. Keep strictly to the word limits — do not pad.
 
-CONVERGENCES: 2-3 mechanisms multiple agents independently converge on.
+CONVERGENCES (60 words max): 2-3 mechanisms multiple agents independently converge on. One sentence each.
 
-TENSIONS: 2-3 productive tensions. State incompatible claims precisely.
+TENSIONS (80 words max): 2-3 productive tensions. State each as a precise incompatible claim pair in one sentence.
 
-MOST TRACTABLE FIRST STEP: The single most tractable step given the available data.
+MOST TRACTABLE FIRST STEP (50 words max): One specific analysis, one dataset, one method.
 
-BLIND SPOTS: 1-2 important phenomena no agent adequately addressed.
+BLIND SPOTS (40 words max): 1-2 phenomena not addressed. One sentence each.
 
-RESEARCH DIRECTIONS (for tagging): List 4-6 specific directions as short titles:
+RESEARCH DIRECTIONS (titles only, no explanation):
 [DEEP+TRACTABLE] Title
 [DEEP+BLOCKED] Title
 [SHALLOW+TRACTABLE] Title
 [SHALLOW+BLOCKED] Title
+(4-6 directions, each title under 20 words)
 
-CONTRADICTIONS (for tracking):
-AGENT1 vs AGENT2: [claim 1] | [claim 2] | Resolution needed: [what would resolve it]`;
+CONTRADICTIONS (one per line, exact format):
+AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resolution needed: [method in ≤15 words]
+(2-3 contradictions)`;
 
   S.currentSynthesis='';
   const synthModelLabel=S.synthesisModel==='opus'?'opus':'sonnet';
@@ -1381,7 +1412,7 @@ function renderRosterResults(raw){
     });
   }
 
-  // Parse mandate updates
+  // Parse mandate updates — offer auto-apply via Haiku rewrite
   const mandateUpdates=[...raw.matchAll(/MANDATE UPDATE:\s*([^\|]+)\|\s*([^\|]+)\|\s*([^\n]+)/g)];
   if(mandateUpdates.length){
     const lbl=document.createElement('div');lbl.className='sec-label';lbl.style.marginTop='10px';lbl.textContent='Mandate drift corrections';results.appendChild(lbl);
@@ -1390,8 +1421,12 @@ function renderRosterResults(raw){
       const agent=agents.find(a=>a.id===id);if(!agent)return;
       const div=document.createElement('div');div.style.cssText='background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 10px;margin-bottom:4px;';
       div.innerHTML=`<div style="font-size:11px;color:var(--text2);margin-bottom:3px;"><strong>${agent.name}</strong>: ${issue}</div>
-        <div style="font-size:11px;color:var(--text3);font-style:italic;margin-bottom:5px;">${suggestion}</div>
-        <button class="sm-btn" onclick="openAgentModal('${id}')">open mandate editor</button>`;
+        <div style="font-size:11px;color:var(--text3);font-style:italic;margin-bottom:6px;">${suggestion}</div>
+        <div style="display:flex;gap:6px;">
+          <button class="mbtn mbtn-p" style="font-size:10px;padding:4px 10px;" onclick="autoApplyMandate('${id}','${encodeURIComponent(issue)}','${encodeURIComponent(suggestion)}',this)">✦ apply correction</button>
+          <button class="sm-btn" onclick="openAgentModal('${id}')">edit manually</button>
+        </div>
+        <div class="mandate-apply-status" style="font-size:10px;color:var(--text3);margin-top:5px;display:none;"></div>`;
       results.appendChild(div);
     });
   }
@@ -1430,6 +1465,51 @@ function applyStatusChange(id,newStatus,btn){
   const statusMap={active:'active',genonly:'genonly',retired:'retired',promoted:'promoted'};
   S.agentStatuses[id]=statusMap[newStatus]||'active';
   renderAgentList();btn.textContent='applied ✓';btn.disabled=true;
+}
+
+async function autoApplyMandate(id, issueEnc, suggestionEnc, btn){
+  const agent=agents.find(a=>a.id===id);
+  if(!agent)return;
+  const issue=decodeURIComponent(issueEnc);
+  const suggestion=decodeURIComponent(suggestionEnc);
+  btn.disabled=true;btn.textContent='rewriting...';
+  const statusEl=btn.closest('div').querySelector('.mandate-apply-status');
+  if(statusEl){statusEl.style.display='block';statusEl.textContent='Calling Haiku to rewrite mandate...';}
+
+  const prompt=`You are rewriting a specialist agent mandate to correct a specific issue identified by a roster agent. Keep the mandate concise (120-150 words) and preserve the agent's core disciplinary perspective.
+
+CURRENT MANDATE:
+${agent.mandate}
+
+ISSUE IDENTIFIED:
+${issue}
+
+SUGGESTED CORRECTION:
+${suggestion}
+
+Write only the revised mandate text. Do not include any preamble, explanation, or commentary. The revised mandate should be approximately the same length as the original.`;
+
+  try{
+    let result='';
+    await apiStream({
+      name:`mandate-apply:${agent.name.slice(0,15)}`,
+      role:'mandate',
+      systemString:'You are a research architect rewriting agent mandates. Be concise and preserve the agent\'s disciplinary identity.',
+      messages:[{role:'user',content:prompt}],
+      onChunk:chunk=>{result+=chunk;}
+    });
+    agent.mandate=result.trim();
+    btn.textContent='applied ✓';
+    if(statusEl){
+      statusEl.textContent=`Mandate updated (${result.trim().split(/\s+/).length} words). Review in the agent editor if needed.`;
+      statusEl.style.color='var(--success)';
+    }
+    setStatus(`Mandate for ${agent.name} updated by roster agent correction.`);
+    renderAgentList();
+  }catch(e){
+    btn.disabled=false;btn.textContent='✦ apply correction';
+    if(statusEl){statusEl.textContent='Error: '+e.message;statusEl.style.color='var(--danger)';}
+  }
 }
 
 // ══════════════════════════════════════════════════════════
