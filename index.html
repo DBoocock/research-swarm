@@ -278,7 +278,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 
   <div class="api-row">
     <label class="field-label">Anthropic API Key</label>
-    <input type="password" class="api-input" id="api-key" placeholder="sk-ant-..." autocomplete="off">
+    <form id="api-key-form" onsubmit="return false;" autocomplete="on" style="width:100%">
+      <input type="text" name="username" value="research-swarm-api" autocomplete="username"
+        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;" tabindex="-1" aria-hidden="true">
+      <input type="password" class="api-input" id="api-key" name="password"
+        placeholder="sk-ant-..." autocomplete="current-password"
+        style="width:100%">
+    </form>
+    <div style="font-size:9px;color:var(--text3);margin-top:4px;line-height:1.4;">
+      Your browser's password manager can save this. Look for the key/lock icon in the address bar after entering your key.
+    </div>
   </div>
 
   <div class="cost-panel">
@@ -309,6 +318,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
       </div>
     </div>
     <div class="agents-scroll"><div class="agent-list" id="agent-list"></div></div>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="ss-hdr"><span>Synthesis model</span></div>
+    <div class="depth-row">
+      <button class="depth-btn active" id="synth-sonnet-btn" onclick="setSynthModel('sonnet',this)">sonnet</button>
+      <button class="depth-btn" id="synth-opus-btn" onclick="setSynthModel('opus',this)">opus</button>
+    </div>
+    <div style="font-size:9px;color:var(--text3);margin-top:4px;line-height:1.4;">Applies to synthesis, meta-agent &amp; roster. Opus costs ~5× more per call but reasons more deeply.</div>
   </div>
 
   <div class="sidebar-section">
@@ -424,9 +442,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 
 <script>
 // ══════════════════════════════════════════════════════════
-// PRICING (Sonnet 4 per million tokens)
+// PRICING (per million tokens)
 // ══════════════════════════════════════════════════════════
-const P={inp:3/1e6, out:15/1e6, cw:3.75/1e6, cr:0.30/1e6};
+const PRICING={
+  'claude-sonnet-4-6':         {inp:3/1e6,    out:15/1e6,   cw:3.75/1e6,  cr:0.30/1e6},
+  'claude-opus-4-6':           {inp:15/1e6,   out:75/1e6,   cw:18.75/1e6, cr:1.50/1e6},
+  'claude-haiku-4-5-20251001': {inp:0.80/1e6, out:4/1e6,    cw:1/1e6,     cr:0.08/1e6},
+};
+function priceFor(model){return PRICING[model]||PRICING['claude-sonnet-4-20250514'];}
 
 // ══════════════════════════════════════════════════════════
 // COLOURS
@@ -525,6 +548,7 @@ let agents=[...DEFAULT_AGENTS.map(a=>({...a}))];
 
 let S={
   depth:'detailed',
+  synthesisModel:'sonnet', // 'sonnet' | 'opus' — controls synthesis, meta-agent, and roster calls
   selectedAgents:new Set(DEFAULT_AGENTS.map(a=>a.id)),
   agentStatuses:Object.fromEntries(DEFAULT_AGENTS.map(a=>[a.id,'active'])), // active|genonly|retired|promoted
   currentRound:0, running:false,
@@ -539,10 +563,34 @@ let S={
 
 let costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[]};
 
+// ── Model selection ──
+// Generation and debate always use Sonnet — reasoning depth matters and parallel cost is manageable.
+// Synthesis and meta-agent are configurable: Sonnet (default) or Opus (higher quality, single call).
+// Compression and mandate generation use Haiku — simple tasks where reasoning depth is not needed.
+const MODELS={
+  generation:  'claude-sonnet-4-6',
+  debate:      'claude-sonnet-4-6',
+  synthesis:   'claude-sonnet-4-6', // overridden by S.synthesisModel
+  meta:        'claude-sonnet-4-6', // overridden by S.synthesisModel
+  roster:      'claude-sonnet-4-6',
+  compression: 'claude-haiku-4-5-20251001',
+  mandate:     'claude-haiku-4-5-20251001',
+};
+
 const DEPTH_DIRS={
-  brief:'Be concise — approximately 180 words. Propose 2 research directions with tight technical specificity.',
-  detailed:'Be thorough — approximately 320 words. Propose 2-3 research directions with clear technical detail.',
-  exhaustive:'Be exhaustive — approximately 500 words. Propose 3 research directions with full technical specification including sketched equations, model structures, or test designs.'
+  brief:
+    'Be concise — approximately 180 words. Propose 2 research directions. ' +
+    'Prioritise tractability: focus on directions that are immediately actionable with available data. ' +
+    'State the core method or model in a single sentence per direction.',
+  detailed:
+    'Be thorough — approximately 320 words. Propose 2-3 research directions with clear technical detail. ' +
+    'For each direction identify: the specific model or framework, the key unknown it addresses, ' +
+    'and what data or analysis it requires. Note one non-obvious implication if applicable.',
+  exhaustive:
+    'Be exhaustive — approximately 500 words. Propose 3 research directions with full technical specification. ' +
+    'For each: sketch the relevant equations or model structure, anticipate the strongest objection from ' +
+    'a competing framework, and propose how that objection could be tested or resolved empirically. ' +
+    'Prioritise directions that are both theoretically deep and not fully covered by adjacent fields.'
 };
 const DEPTH_WORDS={brief:150,detailed:250,exhaustive:400};
 
@@ -570,13 +618,16 @@ function briefOnlyBlock(){
 // COST
 // ══════════════════════════════════════════════════════════
 function resetCost(){costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[]};renderCost();}
-function addUsage(name,u){
+function addUsage(name,u,model){
   const i=u.input_tokens||0,o=u.output_tokens||0,cw=u.cache_creation_input_tokens||0,cr=u.cache_read_input_tokens||0;
+  const P=priceFor(model);
   costS.inp+=i;costS.out+=o;costS.cw+=cw;costS.cr+=cr;
   const c=i*P.inp+o*P.out+cw*P.cw+cr*P.cr;
   const wc=(i+cr)*P.inp+o*P.out+cw*P.inp;
   costS.total+=c;costS.saved+=Math.max(0,wc-c);
-  costS.calls.unshift({name:name.slice(0,24),cost:c,hit:cr>0,cr});
+  // Short model label for display
+  const mlbl=model?.includes('haiku')?'hku':model?.includes('opus')?'ops':'snt';
+  costS.calls.unshift({name:name.slice(0,22),cost:c,hit:cr>0,cr,mlbl});
   renderCost();
 }
 function renderCost(){
@@ -591,17 +642,28 @@ function renderCost(){
   document.getElementById('cpct').textContent=pct+'%';
   document.getElementById('cbar').style.width=pct+'%';
   document.getElementById('call-log').innerHTML=costS.calls.slice(0,8).map(c=>
-    `<div class="cli"><span class="cli-name">${c.name}</span><span class="cli-cost">$${c.cost.toFixed(4)}</span>${c.hit?`<span class="cli-cache">⚡${c.cr.toLocaleString()}</span>`:''}</div>`
+    `<div class="cli"><span class="cli-name">${c.name}</span><span style="font-size:9px;color:var(--text3);margin-left:3px">${c.mlbl||''}</span><span class="cli-cost">$${c.cost.toFixed(4)}</span>${c.hit?`<span class="cli-cache">⚡${c.cr.toLocaleString()}</span>`:''}</div>`
   ).join('');
+}
+
+function resolveModel(role){
+  // For synthesis-tier calls, respect the user's Sonnet/Opus toggle
+  if(['synthesis','meta','roster'].includes(role)){
+    return S.synthesisModel==='opus'
+      ? 'claude-opus-4-6'
+      : 'claude-sonnet-4-6';
+  }
+  return MODELS[role]||MODELS.generation;
 }
 
 // ══════════════════════════════════════════════════════════
 // API
 // ══════════════════════════════════════════════════════════
-async function apiStream({name,systemBlocks,systemString,messages,onChunk,signal}){
+async function apiStream({name,role,systemBlocks,systemString,messages,onChunk,signal}){
   const key=document.getElementById('api-key').value.trim();
   if(!key)throw new Error('No API key entered.');
-  const body={model:'claude-sonnet-4-20250514',max_tokens:1200,stream:true,messages};
+  const model=resolveModel(role||'generation');
+  const body={model,max_tokens:1200,stream:true,messages};
   if(systemBlocks)body.system=systemBlocks;
   else if(systemString)body.system=systemString;
   const resp=await fetch('https://api.anthropic.com/v1/messages',{
@@ -629,7 +691,7 @@ async function apiStream({name,systemBlocks,systemString,messages,onChunk,signal
       }catch{}
     }
   }
-  if(usage)addUsage(name||'call',usage);
+  if(usage)addUsage(name||'call',usage,model);
   return result;
 }
 
@@ -671,6 +733,11 @@ function toggleAgent(id){S.selectedAgents.has(id)?S.selectedAgents.delete(id):S.
 function selectAll(){agents.forEach(a=>S.selectedAgents.add(a.id));renderAgentList();}
 function selectNone(){S.selectedAgents.clear();renderAgentList();}
 function setDepth(d,btn){S.depth=d;document.querySelectorAll('.depth-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+function setSynthModel(m,btn){
+  S.synthesisModel=m;
+  document.getElementById('synth-sonnet-btn').classList.toggle('active',m==='sonnet');
+  document.getElementById('synth-opus-btn').classList.toggle('active',m==='opus');
+}
 function switchTab(name){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -804,6 +871,7 @@ Write only the mandate text for "${name}" — approximately 120 words, technical
     ta.value='';
     await apiStream({
       name:'mandate-gen',
+      role:'mandate',
       systemString:'You are a research architect designing specialist agent mandates for a multi-agent research swarm.',
       messages:[{role:'user',content:prompt}],
       onChunk:chunk=>{result+=chunk;ta.value=result;}
@@ -840,6 +908,7 @@ async function runGen(){
     const promises=allGenAgents.map(agent=>
       apiStream({
         name:agent.name.slice(0,22),
+        role:'generation',
         systemBlocks:agentSystemBlocks(agent.mandate),
         messages:[{role:'user',content:DEPTH_DIRS[S.depth]}],
         signal:new AbortController().signal,
@@ -932,6 +1001,7 @@ async function runDebate(){
       let streaming='';
       return apiStream({
         name:`${a1.name.slice(0,12)} (${partners.length}↔)`,
+        role:'debate',
         systemBlocks:agentSystemBlocks(a1.mandate),
         messages:[{role:'user',content:userMsg}],
         signal:new AbortController().signal,
@@ -1021,14 +1091,16 @@ CONTRADICTIONS (for tracking):
 AGENT1 vs AGENT2: [claim 1] | [claim 2] | Resolution needed: [what would resolve it]`;
 
   S.currentSynthesis='';
+  const synthModelLabel=S.synthesisModel==='opus'?'opus':'sonnet';
   const sc=document.createElement('div');sc.className='synth-card';
-  sc.innerHTML=`<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-run">running</span></div><div class="rcard-body" id="syn-body"><span class="cursor"></span></div>`;
+  sc.innerHTML=`<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-run">running</span><span style="font-size:9px;color:var(--text3);margin-left:6px;">${synthModelLabel}</span></div><div class="rcard-body" id="syn-body"><span class="cursor"></span></div>`;
   panel.appendChild(sc);
   setStatus('Running synthesis...');
 
   try{
     const result=await apiStream({
       name:'synthesis',
+      role:'synthesis',
       systemBlocks:briefOnlyBlock(),
       messages:[{role:'user',content:synthPrompt}],
       signal:new AbortController().signal,
@@ -1066,6 +1138,7 @@ async function compressGenerationOutputs(){
   let raw='';
   await apiStream({
     name:'gen-compress',
+    role:'compression',
     systemBlocks:briefOnlyBlock(),
     messages:[{role:'user',content:prompt}],
     signal:new AbortController().signal,
@@ -1112,6 +1185,7 @@ Propose 4-8 pairs total. Be direct; only change status if genuinely warranted.`;
   try{
     const result=await apiStream({
       name:'meta-agent',
+      role:'meta',
       systemString:'You are a research director making editorial decisions about theoretical perspectives. Be direct and opinionated.',
       messages:[{role:'user',content:metaPrompt}],
       signal:new AbortController().signal,
@@ -1192,6 +1266,7 @@ LOW: [id1] | [id2] | [reason in one sentence]`;
     let raw='';
     await apiStream({
       name:'roster-agent',
+      role:'roster',
       systemBlocks:briefOnlyBlock(),
       messages:[{role:'user',content:prompt}],
       signal:new AbortController().signal,
@@ -1683,6 +1758,8 @@ function makeNotice(text){const d=document.createElement('div');d.className='not
 // INIT
 // ══════════════════════════════════════════════════════════
 renderAgentList();
+renderCost();
+updateOverlapMatrix();
 renderCost();
 updateOverlapMatrix();
 </script>

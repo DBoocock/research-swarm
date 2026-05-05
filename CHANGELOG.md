@@ -1,6 +1,19 @@
 # Changelog
 
-## v4.0.0 — Current
+## v4.1.0
+
+### Model selection
+- **Sonnet/Opus toggle** in sidebar for synthesis, meta-agent, and roster agent calls. Opus applies where reasoning quality most affects session value; generation and debate remain on Sonnet regardless
+- **Haiku for compression and mandate generation** — generation output compression and mandate drafting switched from Sonnet to Haiku (simple tasks, ~4× cheaper, no quality impact)
+- **Per-model accurate cost tracking** — cost tracker uses correct pricing per model (Sonnet / Opus / Haiku) rather than assuming Sonnet throughout
+- **Model indicator in call log** — each call log entry shows a three-letter model label (snt / ops / hku)
+
+### Depth instructions
+- Depth settings now include explicit reasoning style guidance alongside word count: brief prioritises tractability, detailed asks for key unknowns and implications, exhaustive requires sketched equations and anticipation of objections
+
+---
+
+## v4.0.0 — Initial release
 
 ### New features
 - **Editable brief**: title, subtitle, problem context, research context, and data description all editable via the sidebar header modal

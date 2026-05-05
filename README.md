@@ -320,34 +320,37 @@ Use the overlap matrix to inform manual pairing decisions or to evaluate whether
 ### Live cost display
 
 The sidebar shows live session cost broken down by:
-- Input tokens (billed at $3.00/M)
-- Output tokens (billed at $15.00/M)
-- Cache reads (billed at $0.30/M — 10× cheaper than input)
-- Cache writes (billed at $3.75/M — one-time cost per cached block)
+- Input tokens
+- Output tokens
+- Cache reads (10× cheaper than input per model)
+- Cache writes (one-time cost per cached block)
 - **Saved via caching**: the cumulative saving compared to sending uncached input
 
-A cache hit rate bar shows what fraction of input tokens are being served from cache.
+A cache hit rate bar shows what fraction of input tokens are being served from cache. Each entry in the per-call log shows the call name, a three-letter model indicator (snt / ops / hku), cost, and a ⚡ indicator with cache-read token count if the call hit the cache.
 
-The per-call log shows each API call name, its cost, and a ⚡ indicator with the number of cache-read tokens if the call hit the cache.
+### Model selection and pricing
 
-### How prompt caching works
+Different call types use different models, selectable or fixed:
 
-The combined brief (problem context + research context + available data) is sent as a single cached block with every generation and debate call. The first call in a round writes the cache; all subsequent parallel calls hit it. With the default 10-agent roster, calls 2–10 pay only $0.30/M for the brief instead of $3.00/M — a 10× reduction on the largest part of the input.
+| Call type | Model | Control |
+|---|---|---|
+| Generation | Sonnet 4.6 | Fixed |
+| Debate | Sonnet 4.6 | Fixed |
+| Synthesis | Sonnet 4.6 or Opus 4.6 | **Sonnet/Opus toggle in sidebar** |
+| Meta-agent | Sonnet 4.6 or Opus 4.6 | Follows synthesis toggle |
+| Roster agent | Sonnet 4.6 or Opus 4.6 | Follows synthesis toggle |
+| Generation compression | Haiku 4.5 | Fixed (simple summarisation) |
+| Mandate generation | Haiku 4.5 | Fixed (simple drafting) |
 
-The agent mandate is sent as a second, uncached block immediately after the cached brief. This means editing a mandate does not invalidate the shared cache.
+Approximate token prices per million:
 
-The brief cache has a 5-minute TTL (time to live). Within a single session all calls will hit the cache. Across sessions, the first call after the TTL expires will pay a cache write fee.
+| Model | Input | Output | Cache write | Cache read |
+|---|---|---|---|---|
+| Sonnet 4 | $3.00 | $15.00 | $3.75 | $0.30 |
+| Opus 4 | $15.00 | $75.00 | $18.75 | $1.50 |
+| Haiku 4.5 | $0.80 | $4.00 | $1.00 | $0.08 |
 
-### Typical costs
-
-| Session type | Approximate cost |
-|---|---|
-| Single generation round, 10 agents, detailed | $0.05–$0.10 |
-| Full round (generation + debate + synthesis), detailed | $0.12–$0.20 |
-| 5 full rounds, detailed | $0.50–$0.80 |
-| Exhaustive depth, 10 agents, full round | $0.25–$0.40 |
-
-Cache savings typically reach 60–80% on the input token cost by the second call in a generation round.
+The **Opus toggle** applies to synthesis, meta-agent, and roster agent calls only — the three calls where reasoning quality most directly affects the session's value, and where the calls are single rather than parallel batches, keeping the cost premium modest. Generation and debate remain on Sonnet regardless of the toggle.
 
 ---
 
@@ -457,8 +460,11 @@ For post-debate synthesis, generation outputs are first compressed to ~80 words 
 ### Synthesis uses brief-only cached block
 The synthesis call caches the shared brief block without any agent mandate, since the synthesis agent's role is not specialist but integrative.
 
-### Meta-agent and roster agent are uncached
-These calls have unique inputs not shared with other calls and are not worth caching. They use a plain string system prompt.
+### Haiku for low-reasoning tasks
+Generation compression (summarising each agent's output to ~80 words) and mandate generation (drafting a new agent mandate from the brief) are simple tasks where reasoning depth does not affect quality. Both use Haiku, which costs approximately 4× less than Sonnet for input and output tokens.
+
+### Improved depth instructions
+Each depth setting now includes explicit reasoning style guidance — not just word count, but what kind of reasoning to prioritise. Brief depth prioritises tractability and conciseness; detailed depth asks for identification of key unknowns and implications; exhaustive depth requires sketched equations, anticipation of objections, and empirical resolution proposals. This produces more meaningfully differentiated outputs across depth settings at no additional token cost.
 
 ---
 
@@ -472,19 +478,19 @@ There is no build step, no bundler, no package manager, and no server-side compo
 
 ### API calls made during a session
 
-| Call type | System prompt | Caching |
-|---|---|---|
-| Generation (per agent) | Cached brief + uncached mandate | ✅ Cached brief |
-| Debate (per responding agent) | Cached brief + uncached mandate | ✅ Cached brief |
-| Generation compression (batched) | Cached brief | ✅ Cached brief |
-| Synthesis | Cached brief only | ✅ Cached brief |
-| Meta-agent | Plain string | ❌ |
-| Roster agent | Cached brief | ✅ Cached brief |
-| Mandate generation | Plain string | ❌ |
+| Call type | Model | System prompt | Caching |
+|---|---|---|---|
+| Generation (per agent) | Sonnet 4.6 | Cached brief + uncached mandate | ✅ Cached brief |
+| Debate (per responding agent) | Sonnet 4.6 | Cached brief + uncached mandate | ✅ Cached brief |
+| Generation compression (batched) | **Haiku 4.5** | Cached brief | ✅ Cached brief |
+| Synthesis | Sonnet 4.6 / **Opus 4.6** | Cached brief only | ✅ Cached brief |
+| Meta-agent | Sonnet 4.6 / **Opus 4.6** | Plain string | ❌ |
+| Roster agent | Sonnet 4.6 / **Opus 4.6** | Cached brief | ✅ Cached brief |
+| Mandate generation | **Haiku 4.5** | Plain string | ❌ |
 
-### Model
+### Models
 
-All calls use `claude-sonnet-4-20250514`. This is hardcoded and can be changed by editing the `model` field in the `apiStream` function.
+Generation and debate use `claude-sonnet-4-6`. Synthesis, meta-agent, and roster agent use Sonnet by default, switchable to `claude-opus-4-6` via the sidebar toggle. Generation compression and mandate generation use `claude-haiku-4-5-20251001`. All model strings are defined in the `MODELS` constant and can be changed there.
 
 ---
 
