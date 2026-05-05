@@ -357,8 +357,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
     <div class="tab-actions">
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="importSession(event)">
       <button class="sm-btn" onclick="document.getElementById('import-file').click()">import session</button>
-      <button class="sm-btn" onclick="exportMd()">export md</button>
-      <button class="sm-btn" onclick="exportJson()">export json</button>
+      <button class="sm-btn" onclick="exportMd()">↓ md</button>
+      <button class="sm-btn" onclick="copyMdToClipboard()">⎘ md</button>
+      <button class="sm-btn" onclick="exportJson()">↓ json</button>
+      <button class="sm-btn" onclick="copyJsonToClipboard()">⎘ json</button>
     </div>
   </div>
 
@@ -646,6 +648,17 @@ function renderCost(){
   ).join('');
 }
 
+// Max tokens per call type — synthesis produces long structured output and needs more room
+const MAX_TOKENS={
+  synthesis:  4000,
+  meta:       2000,
+  roster:     3000,
+  generation: 1200,
+  debate:     1200,
+  compression: 600,
+  mandate:     800,
+};
+
 function resolveModel(role){
   // For synthesis-tier calls, respect the user's Sonnet/Opus toggle
   if(['synthesis','meta','roster'].includes(role)){
@@ -663,7 +676,8 @@ async function apiStream({name,role,systemBlocks,systemString,messages,onChunk,s
   const key=document.getElementById('api-key').value.trim();
   if(!key)throw new Error('No API key entered.');
   const model=resolveModel(role||'generation');
-  const body={model,max_tokens:1200,stream:true,messages};
+  const maxTok=MAX_TOKENS[role||'generation']||1200;
+  const body={model,max_tokens:maxTok,stream:true,messages};
   if(systemBlocks)body.system=systemBlocks;
   else if(systemString)body.system=systemString;
   const resp=await fetch('https://api.anthropic.com/v1/messages',{
@@ -1589,23 +1603,38 @@ function renderLog(){
   });
 }
 
+function exportFilename(ext){
+  // Use configurable prefix so files sort together and are easy to find/move
+  const prefix=brief.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,24);
+  return `${prefix}-R${S.currentRound}-${Date.now()}.${ext}`;
+}
+
 function autoExportJson(){
   try{
+    const fname=exportFilename('json');
     const data=buildExportData();
     const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=`swarm-${Date.now()}.json`;a.click();
+    const a=document.createElement('a');a.href=url;a.download=fname;a.click();
     URL.revokeObjectURL(url);
+    setLastExport(fname,'json');
   }catch(e){console.warn('Auto JSON export failed',e);}
 }
 
 function autoExportMd(){
   try{
+    const fname=exportFilename('md');
     const blob=new Blob([buildMd()],{type:'text/markdown'});
     const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=`swarm-${Date.now()}.md`;a.click();
+    const a=document.createElement('a');a.href=url;a.download=fname;a.click();
     URL.revokeObjectURL(url);
+    setLastExport(fname,'md');
   }catch(e){console.warn('Auto MD export failed',e);}
+}
+
+function setLastExport(fname,type){
+  // Show filename in footer so user knows what was saved and where to find it
+  setStatus(`Exported: ${fname} → your Downloads folder`);
 }
 
 function buildExportData(){
@@ -1642,20 +1671,40 @@ function buildMd(){
 
 function exportJson(){
   try{
+    const fname=exportFilename('json');
     const blob=new Blob([JSON.stringify(buildExportData(),null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=`swarm-${Date.now()}.json`;a.click();
+    const a=document.createElement('a');a.href=url;a.download=fname;a.click();
     URL.revokeObjectURL(url);
+    setLastExport(fname,'json');
   }catch(e){console.warn('Export failed',e);}
 }
 
 function exportMd(){
   try{
+    const fname=exportFilename('md');
     const blob=new Blob([buildMd()],{type:'text/markdown'});
     const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=`swarm-${Date.now()}.md`;a.click();
+    const a=document.createElement('a');a.href=url;a.download=fname;a.click();
     URL.revokeObjectURL(url);
+    setLastExport(fname,'md');
   }catch(e){console.warn('Export failed',e);}
+}
+
+function copyMdToClipboard(){
+  try{
+    navigator.clipboard.writeText(buildMd()).then(()=>{
+      setStatus('Markdown copied to clipboard — paste into any file in your project directory.');
+    });
+  }catch(e){setStatus('Clipboard copy failed: '+e.message);}
+}
+
+function copyJsonToClipboard(){
+  try{
+    navigator.clipboard.writeText(JSON.stringify(buildExportData(),null,2)).then(()=>{
+      setStatus('JSON copied to clipboard — paste into any file in your project directory.');
+    });
+  }catch(e){setStatus('Clipboard copy failed: '+e.message);}
 }
 
 function importSession(event){
