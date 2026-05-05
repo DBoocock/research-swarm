@@ -683,7 +683,7 @@ async function apiStream({name,role,systemBlocks,systemString,messages,onChunk,s
   const resp=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01',
-      'anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'prompt-caching-2024-07-31'},
+      'anthropic-dangerous-direct-browser-access':'true'},
     body:JSON.stringify(body),signal
   });
   if(!resp.ok){const e=await resp.text();throw new Error(`API ${resp.status}: ${e.slice(0,200)}`);}
@@ -918,8 +918,12 @@ async function runGen(){
     bodyEls[agent.id].innerHTML='<span class="cursor"></span>';
   });
   try{
-    // All agents share the same cached brief block — first call writes, rest hit
-    const promises=allGenAgents.map(agent=>
+    // Caching strategy: the shared brief block must be written to cache before
+    // parallel calls can read it. Cache entries are only available after the
+    // first response *begins* streaming — concurrent calls cannot hit a cache
+    // written in the same batch. Fix: run agent[0] alone first (writes cache),
+    // then fire agents[1..n] in parallel (all hit the warm cache).
+    const makeAgentCall = agent =>
       apiStream({
         name:agent.name.slice(0,22),
         role:'generation',
@@ -941,9 +945,17 @@ async function runGen(){
           if(last.hit){const s=document.createElement('span');s.className='rcard-cache';s.textContent='⚡';h.appendChild(s);}
           const s=document.createElement('span');s.className='rcard-cost';s.textContent='$'+last.cost.toFixed(4);h.appendChild(s);
         }
-      })
-    );
-    await Promise.all(promises);
+      });
+
+    // Primer call: writes the cache
+    setStatus(`Round ${S.currentRound} — writing cache (agent 1/${allGenAgents.length})...`);
+    await makeAgentCall(allGenAgents[0]);
+
+    // Parallel calls: all hit the warm cache
+    if(allGenAgents.length > 1){
+      setStatus(`Round ${S.currentRound} — ${allGenAgents.length - 1} agents reading from cache...`);
+      await Promise.all(allGenAgents.slice(1).map(makeAgentCall));
+    }
     updateRoundHdr(hdr,'done');tc('gen',allGenAgents.length);
     setStatus('Generation complete. Compressing outputs for synthesis...');
     await runSynthesis(false);
@@ -987,11 +999,11 @@ async function runDebate(){
   });
 
   try{
-    const promises=Object.entries(agentPartners).map(([id1,partners])=>{
+    const debateEntries=Object.entries(agentPartners);
+    const makeDebateCall=([id1,partners])=>{
       const a1=agents.find(a=>a.id===id1);
       if(!a1)return Promise.resolve();
       const isBatched=partners.length>1;
-      // Build user message: if multiple partners, list all; each gets a labeled response
       let userMsg;
       if(isBatched){
         userMsg=`You have ${partners.length} debate partners this round. For each, write a focused response of approximately ${words} words, labelled exactly as shown.\n\n`;
@@ -1011,7 +1023,6 @@ async function runDebate(){
         const out2=S.currentGen[p.id]||'(no output)';
         userMsg=`You have read the output of ${a2?.name||p.id} (below). Write a focused debate response (~${words} words): challenge assumptions, identify incompatible predictions, or show how combining both frameworks yields something neither could produce alone.\n\n${a2?.name||p.id} wrote:\n---\n${out2}\n---\n\nBe direct, technically specific, and honest about where your own framework has limits.`;
       }
-
       let streaming='';
       return apiStream({
         name:`${a1.name.slice(0,12)} (${partners.length}↔)`,
@@ -1021,14 +1032,12 @@ async function runDebate(){
         signal:new AbortController().signal,
         onChunk:chunk=>{
           streaming+=chunk;
-          // Update all relevant pair cards as text streams in
           partners.forEach(p=>{
             const key=id1+'_'+p.id;
             if(pairBodyEls[key])pairBodyEls[key].innerHTML=streaming+'<span class="cursor"></span>';
           });
         }
       }).then(result=>{
-        // Parse batched response into per-pair chunks
         if(isBatched){
           partners.forEach(p=>{
             const a2=agents.find(a=>a.id===p.id);
@@ -1045,8 +1054,15 @@ async function runDebate(){
           if(pairBodyEls[key])pairBodyEls[key].innerHTML=result;
         }
       });
-    });
-    await Promise.all(promises);
+    };
+
+    // Primer call writes the cache, then remaining debate calls hit it in parallel
+    setStatus(`Debate — writing cache (pair 1/${debateEntries.length})...`);
+    await makeDebateCall(debateEntries[0]);
+    if(debateEntries.length > 1){
+      setStatus(`Debate — ${debateEntries.length - 1} pairs reading from cache...`);
+      await Promise.all(debateEntries.slice(1).map(makeDebateCall));
+    }
     updateRoundHdr(hdr,'done');tc('deb',activePairs.length);
     setStatus('Debate complete. Running synthesis...');
     await runSynthesis(true);
