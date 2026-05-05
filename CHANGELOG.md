@@ -1,5 +1,44 @@
 # Changelog
 
+## v4.3.0
+
+### Tighter synthesis output (~60% token reduction)
+- Synthesis prompt now has explicit per-section word limits: CONVERGENCES 60w, TENSIONS 80w, MOST TRACTABLE FIRST STEP 50w, BLIND SPOTS 40w, RESEARCH DIRECTIONS as short titles only (no explanation), CONTRADICTIONS with each field capped at 15 words
+- `synthesis max_tokens`: 4,000 → 1,200 (matches constrained prompt; previous limit was set to avoid truncation before the prompt was tightened)
+- `meta max_tokens`: 2,000 → 1,500
+- `mandate max_tokens`: 800 → 600
+- Expected synthesis output reduction: ~2,900 tokens → ~600–800 tokens per call
+
+### Smart generation — do not re-run agents with existing outputs
+- `runGen()` now checks which agents already have generation outputs
+- First round: runs all selected agents as before
+- Subsequent rounds: runs only agents with no existing output (i.e. newly added agents)
+- Existing `currentGen` outputs are preserved between rounds, not overwritten
+- If all agents already have outputs, redirects user to the debate tab
+- Round header and status bar distinguish new-agent runs from full generation rounds
+- This makes the intended workflow (generate once, debate multiple times) the default behaviour rather than requiring a separate UI mode
+
+### Auto-apply mandate corrections from roster agent
+- Roster agent "Mandate drift corrections" section now has two buttons per correction:
+  - **✦ apply correction**: calls Haiku to rewrite the mandate incorporating the correction, preserving the agent's disciplinary identity and keeping it ~120–150 words. Status message shows word count and prompts review.
+  - **edit manually**: opens the agent editor as before
+- Uses Haiku at `mandate` role (600 token limit) — appropriate for constrained rewriting
+
+### Documentation
+- `HANDOVER.md` added: comprehensive technical handover for future developers covering architecture, caching details, model routing, state object, parsing quirks, cost structure, design principles, open issues, and recommended next steps
+- `reflection-round-issue.md` added: GitHub issue template for the reflection round feature — post at github.com/DBoocock/research-swarm/issues/new and then delete from the repository (content belongs in the issue tracker, not the codebase)
+
+---
+
+## v4.2.1
+
+### Bug fixes (identified from session JSON analysis)
+- **Round numbering**: all rounds were saved as `round: 1`. `saveRound()` used `S.currentRound` which stays at 1 because `runSynthesis()` is called after both generation and debate without incrementing the counter. Fixed: use `S.rounds.length + 1` as the sequence number — each saved record now gets a unique incrementing label.
+- **Contradictions not parsed**: synthesis model outputs bold markdown format `**AGENT vs. AGENT:**` but the regex expected plain `AGENT vs AGENT:`. Updated regex handles optional bold asterisks, optional period after "vs", and case-insensitive matching. Verified against 3-round session: correctly extracts all 9 contradictions.
+- **Research map titles prefixed with `** `**: model outputs `[DEEP+TRACTABLE] ** Title` — the title stripping regex only removed digits and bullets, not asterisks. Fixed strip pattern in both research map and matrix title extraction.
+
+---
+
 ## v4.2.0 — Prompt caching confirmed working
 
 ### Caching fix — root cause and resolution

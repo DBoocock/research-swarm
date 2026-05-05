@@ -34,11 +34,11 @@ Originally built to study the dynamics of community rock climb difficulty gradin
 
 The swarm operates in two rounds per iteration, followed by automated synthesis and meta-agent analysis.
 
-**Generation round**: All selected agents receive the shared research brief plus their individual specialist mandate. They run in parallel, each independently proposing 2–3 theoretical research directions from their disciplinary perspective.
+**Generation round**: Selected agents receive the shared research brief plus their individual specialist mandate. On the first round all selected agents run; on subsequent rounds only newly added agents run — existing generation outputs are preserved. Agents run in primer-then-parallel order (the first agent alone to write the cache, then the rest in parallel reading from it).
 
 **Debate round**: The meta-agent assigns debate pairings — agents are assigned one or more partners whose generation output they read and respond to. Multiple pairings per agent are allowed and encouraged. Debates are batched: an agent with three partners makes one API call rather than three, with responses labelled per partner.
 
-**Synthesis**: An arbitration agent reads all generation and debate outputs and produces a structured synthesis: convergences (directions multiple agents agree on), tensions (genuine theoretical disagreements), the single most tractable first empirical step, blind spots, a tagged list of research directions by depth and tractability, and a contradiction log.
+**Synthesis**: An arbitration agent reads all generation and debate outputs and produces a concise structured synthesis with explicit word limits per section: convergences, tensions, the single most tractable first empirical step, blind spots, tagged research directions, and a contradiction log.
 
 **Meta-agent**: After synthesis, a meta-agent proposes debate pairings for the next round (with typed justifications: CONTRADICTION, INTERSECTION, DISRUPTION, or BRIDGE) and recommends agent status changes (active, generation-only, retired, promoted). You review and accept or reject each recommendation before the next round launches.
 
@@ -194,7 +194,7 @@ To create an agent with overlapping expertise (for productive debate tension), c
 
 3. **Choose depth** — `brief` (~180 words per agent) for rapid exploration, `detailed` (~320 words) for standard sessions, `exhaustive` (~500 words) for deep dives into specific directions.
 
-4. **Run generation** — click **run generation round →**. All selected active and gen-only agents run in parallel. Outputs stream in simultaneously.
+4. **Run generation** — click **run generation round →**. On the first round all selected agents run; on subsequent rounds only newly added agents run (existing outputs are preserved). Outputs stream in as they complete.
 
 5. **Review synthesis** — the synthesis tab auto-populates after generation completes. Read the CONVERGENCES, TENSIONS, BLIND SPOTS, and MOST TRACTABLE FIRST STEP sections.
 
@@ -241,18 +241,18 @@ Debate pairings are directional: the agent listed first (id1) reads and responds
 
 ### Synthesis structure
 
-The synthesis agent produces output in six structured sections:
+The synthesis agent produces concise output in six structured sections, each with an explicit word limit to control output token cost:
 
-- **CONVERGENCES**: 2–3 mechanisms or themes multiple agents independently converged on
-- **TENSIONS**: 2–3 productive disagreements with precisely stated incompatible claims
-- **MOST TRACTABLE FIRST STEP**: a single specific analysis to run given the available data
-- **BLIND SPOTS**: 1–2 important phenomena no agent adequately addressed
-- **RESEARCH DIRECTIONS**: 4–6 directions tagged as `[DEEP+TRACTABLE]`, `[DEEP+BLOCKED]`, `[SHALLOW+TRACTABLE]`, or `[SHALLOW+BLOCKED]`
-- **CONTRADICTIONS**: 2–3 incompatible claim pairs in structured format for the contradiction tracker
+- **CONVERGENCES** (60 words): 2–3 mechanisms multiple agents independently converged on, one sentence each
+- **TENSIONS** (80 words): 2–3 productive disagreements, each stated as a precise incompatible claim pair
+- **MOST TRACTABLE FIRST STEP** (50 words): one specific analysis, one dataset, one method
+- **BLIND SPOTS** (40 words): 1–2 phenomena not adequately addressed, one sentence each
+- **RESEARCH DIRECTIONS**: 4–6 short titles tagged `[DEEP+TRACTABLE]`, `[DEEP+BLOCKED]`, `[SHALLOW+TRACTABLE]`, or `[SHALLOW+BLOCKED]` — titles only, no explanation
+- **CONTRADICTIONS**: 2–3 incompatible claim pairs, each field capped at 15 words, in structured format for the contradiction tracker
 
 ### Two-stage synthesis compression
 
-For post-debate synthesis (which would otherwise include both generation outputs and debate outputs, growing unboundedly), generation outputs are first compressed to ~80 words each in a single batched API call. Only the debate outputs are passed at full length. This keeps synthesis input size bounded across rounds.
+For post-debate synthesis, generation outputs are first compressed to ~80 words each in a single batched Haiku call. Only the debate outputs are passed at full length. This keeps synthesis input size bounded across rounds.
 
 ### Meta-agent
 
@@ -268,7 +268,7 @@ The roster agent produces:
 
 - **New agent suggestions**: up to 3 suggested agents with draft mandates, colour suggestions, and justifications. Each can be added immediately or opened for editing first.
 - **Status change recommendations**: agents to retire, promote, move to gen-only, or reactivate.
-- **Mandate drift corrections**: cases where a mandate has become inconsistent with the current brief or with other mandates, with suggested corrections.
+- **Mandate drift corrections**: cases where a mandate has become inconsistent with the current brief or with other mandates. Each correction has two options: **✦ apply correction** (calls Haiku to rewrite the mandate incorporating the fix, preserving the agent's disciplinary identity and keeping it concise) or **edit manually** (opens the agent editor).
 - **Overlap notes**: pairs with high or low predicted debate productivity, which update the overlap matrix.
 
 The roster agent is best run before starting a new session, after significantly editing the brief, or after several rounds when the roster may need restructuring. It is intentionally distinct from the meta-agent: the meta-agent reacts to what agents actually produced, while the roster agent reasons prospectively about mandate design.
@@ -469,8 +469,11 @@ For post-debate synthesis, generation outputs are first compressed to ~80 words 
 ### Haiku for low-reasoning tasks
 Generation compression and mandate generation use Haiku (~4× cheaper than Sonnet for input and output tokens). These are simple summarisation and drafting tasks where reasoning depth does not affect quality.
 
-### Improved depth instructions
-Each depth setting includes explicit reasoning style guidance alongside word count. Brief prioritises tractability; detailed asks for key unknowns and implications; exhaustive requires sketched equations, anticipation of objections, and empirical resolution proposals. This produces more meaningfully differentiated outputs at no additional token cost.
+### Tightly constrained synthesis prompt
+The synthesis prompt specifies exact word limits per section (60 / 80 / 50 / 40 words for the prose sections, short titles only for research directions, 15-word field caps for contradictions). This reduces synthesis output from ~2,900 tokens to ~600–800 tokens — a saving of roughly $0.03 per synthesis call at Sonnet rates. The `max_tokens` for synthesis is set to 1,200 to match.
+
+### Smart generation — only new agents
+After the first round, the generation button only runs agents with no existing output. Newly added agents get their initial generation without re-running agents who have already contributed. If all agents already have outputs, the button redirects to the debate tab. This means generation outputs persist between debate rounds and are only cleared at the very start of a fresh session.
 
 ---
 
@@ -493,6 +496,7 @@ There is no build step, no bundler, no package manager, and no server-side compo
 | Meta-agent | Sonnet 4.6 / **Opus 4.6** | Plain string | ❌ |
 | Roster agent | Sonnet 4.6 / **Opus 4.6** | Cached brief | ✅ Cached brief |
 | Mandate generation | **Haiku 4.5** | Plain string | ❌ |
+| Mandate auto-apply correction | **Haiku 4.5** | Plain string | ❌ |
 
 ### Models
 
