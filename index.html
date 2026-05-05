@@ -494,14 +494,39 @@ The Darth Grader website (darth-grader.net) grades long climbs by decomposing th
 - Boulder-to-route conversion: ~+3.3 grades when boulder is FIRST (before endurance), ~+5 grades when AFTER endurance — reflecting the asymmetry that bouldering after being pumped is harder than being pumped after bouldering
 - The difficulty-grade relationship is proposed to be linear: Y = a·X + b, where slope 'a' is approximately constant across regions but intercept 'b' varies by region — formalising the concept of regional grading cultures
 - The "slash" phenomenon: some routes sit exactly at the boundary between two grades
-- To grade reliably, a climber should be in their "moderate comfort zone" — the route should be medium-hard for them. Psychophysical sensitivity is reduced at very easy (hyposensitivity) or near-maximum (hypersensitivity) difficulties
+- To grade reliably, a climber should be in their "moderate comfort zone" — the route should be medium-hard for them. Psychophysical sensitivity is reduced at very easy (hyposensitivity) or near-maximum (hypersensitivity) difficulties (Delignières 1991)
 - Regular ascent of benchmark routes serves as calibration of the climber's internal grading instrument
 
+DARTH GRADER — REST QUALITY AND SECTION INTERACTION:
+Rests between sections are classified as: G (good, 90-100% recovery), M (medium), B (bad, short shake-out), N (no rest). The total route grade emerges from section grades and rest qualities via empirically fitted curves. Key asymmetry: for second section grade x and first section grade y, x must satisfy x > y-4 to influence the total grade, and y must satisfy y > x-6 to influence from the first position. This means weak sections far below the crux contribute negligibly. Example decompositions from benchmark routes:
+- "Silence" 9c (Flatanger): 8b G 8C M 8B B 7C+ G 7A
+- "Bibliographie" 9b+ (Céüse): 8b+ G 8B B 9a G 7c
+- "La Rage de Vivre" 8b+ (Buoux): 8b G 8a+
+- "Le Minimum" 8c (Buoux): 7c N 7C/7C+ M 7c
+
+BOULDER-TO-ROUTE GRADE EQUIVALENCE:
+7A→7c, 7A+→7c+, 7B→8a, 7B+→8a+, 7C→8b, 7C+→8b+, 8A→8c, 8A+→8c+, 8B→9a, 8B+→9a+, 8C→9b. The factor is approximately +4 grades, reduced to +3.3 when the boulder is first (concentration only at start) and increased to ~+5 when the boulder follows an endurance section.
+
+GRADING ACCURACY AND ABILITY LEVEL:
+A climber can only objectively grade routes in their "moderate comfort zone". For a regular 8a climber: 8b is in the hard work zone (hypersensitivity — small extra effort seems insurmountable), while 7a is in the great comfort zone (hyposensitivity — hard to distinguish easy from very easy). The non-linear relationship between perceived exertion and difficulty means graders at the extremes of their range produce systematically biased grades. The same proportionality pattern holds across ability levels: a 7c climber onsights 7a, sends 7b in a session, and redpoints 7c — identical 2-grade spread to an 8b climber who onsights 7c, sends 8a in a session, and redpoints 8b.
+
 ABILITY DISTRIBUTION:
-The distribution of climbing abilities is heavily skewed toward lower grades — many more beginners than experts. The votes of beginner and expert climbers receive equal weight in the consensus. A small group of elite professional climbers establishes routes of the very highest difficulty, extending the grading scale into new territory.`;
+The distribution of climbing abilities is heavily skewed toward lower grades — many more beginners than experts. The votes of beginner and expert climbers receive equal weight in the consensus. A small group of elite professional climbers establishes routes of the very highest difficulty, extending the grading scale into new territory.
+
+REGIONAL GRADING CULTURE:
+Different climbing areas systematically differ in the intercept b of the linear difficulty-grade relationship. Céüse and Fontainebleau are commonly cited as reference grading scales. Some areas are consistently "hard" (routes feel harder than their grade implies) or "soft" (routes feel easier). This regional culture is partly set by the ability level of the first ascentionists and guidebook authors — graders too far above or below the route's difficulty produce systematically biased grades due to the hypo/hypersensitivity effect. Historical drift compounds this: as the global grade scale evolves over time, older crags within the same region may feel sandbagged or soft relative to newer crags, creating within-region temporal inconsistency alongside between-region spatial inconsistency.
+
+KEY OPEN QUESTIONS FOR RESEARCH:
+The following questions are currently unresolved and represent productive targets for theoretical and empirical work:
+1. What is the empirical magnitude of the anchoring coefficient — how strongly does the current consensus grade pull individual proposals toward it?
+2. Is grade inflation primarily driven by selection bias (harder climbers systematically proposing lower grades as routes become accessible) or by anchoring/transmission bias in grade proposals?
+3. Is climbing difficulty a well-defined scalar quantity, or do rank-reversal effects across ability levels provide evidence of genuine multidimensionality?
+4. Do the coveted grade thresholds (7a, 8a, 9a) create detectable clustering in the empirical grade distribution — a sawtooth distortion with peaks at threshold grades?
+5. How does the spatial structure of the climber-route network (local vs. travelling climbers, hub crags) shape the propagation and convergence of regional grading norms?`;
+
 
 const DEF_DATA=`AVAILABLE DATA:
-The following fields are obtainable from online ascent databases (8a.nu and ukclimbing.com/logbook/) subject to a research data agreement, which is anticipated to be obtainable via a polite request to the platform operators:
+The following fields are obtainable from online ascent databases (8a.nu and ukclimbing.com/logbook/) subject to a research data agreement, which is anticipated to be obtainable via a polite request to the platform operators (8a.nu is operated by Vertical Life; contact support@vertical-life.info for research data requests):
 - Ascentionist identity (enabling longitudinal tracking of individual climbers across routes and time)
 - Date of ascent
 - Personal grade proposed by the ascentionist
@@ -509,7 +534,9 @@ The following fields are obtainable from online ascent databases (8a.nu and ukcl
 - Location of the climb (crag, region, country)
 - Route quality rating
 
-Treat all research directions requiring this dataset as tractable — data access is a moderate practical step, not a fundamental barrier. Flag any direction requiring data not listed above (e.g. route physical feature measurements, climber physiological data) as requiring new data collection.`;
+The two databases have partially overlapping user populations but different geographical emphases: 8a.nu skews toward continental European sport climbing and higher grades; UKClimbing logbook skews toward UK trad and sport climbing across all grades. This geographical and stylistic sampling bias in the database populations is itself a research consideration when making inferences about global grade dynamics.
+
+Treat all research directions requiring this dataset as tractable — data access is a moderate practical step, not a fundamental barrier. Flag any direction requiring data not listed above (e.g. route physical feature measurements, climber physiological data, route style tags) as requiring new data collection.`;
 
 // ══════════════════════════════════════════════════════════
 // DEFAULT AGENTS
@@ -606,6 +633,11 @@ function buildCachedBlock(){
 }
 
 function agentSystemBlocks(mandate){
+  // cache_control on block[0] (the brief alone).
+  // The expanded brief is now ~2200+ tokens, safely above Sonnet 4.6's
+  // 2048-token minimum. Caching the brief alone (not the mandate) means
+  // all agents share the same single cache entry regardless of which
+  // agent is calling, maximising cache hit rate.
   return[
     {type:'text',text:buildCachedBlock(),cache_control:{type:'ephemeral'}},
     {type:'text',text:'\n\nYOUR SPECIALIST MANDATE:\n'+mandate}
@@ -1823,6 +1855,8 @@ function makeNotice(text){const d=document.createElement('div');d.className='not
 // INIT
 // ══════════════════════════════════════════════════════════
 renderAgentList();
+renderCost();
+updateOverlapMatrix();
 renderCost();
 updateOverlapMatrix();
 renderCost();
