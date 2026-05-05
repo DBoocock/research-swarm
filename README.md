@@ -138,7 +138,7 @@ Additional domain knowledge: prior work, specific frameworks or models that alre
 ### Available data
 What data you have realistic access to, what fields it contains, and how it was or can be obtained. Describe only data that is genuinely available for your research — the synthesis agent uses this to judge which directions are tractable, and listing inaccessible data obscures rather than informs that judgement. If you are specifically interested in brainstorming data collection strategies, you can note that as an explicit goal in the problem context instead. Typical length: 80–150 words.
 
-> **Caching note**: All three content fields (problem context, research context, available data) are combined into a single cached block sent with every generation and debate call. Editing any of them invalidates the cache and triggers a fresh cache write on the next run — you will see a "cache invalidated" notice in the tab bar. The title and subtitle are not part of the cached block.
+> **Caching note**: All three content fields (problem context, research context, available data) are combined into a single cached block sent with every generation and debate call. Editing any of them invalidates the cache and triggers a fresh cache write on the next run. The combined brief must exceed **2,048 tokens** (~8,000 characters) for caching to activate on Sonnet 4.6 — below this threshold every call pays full input price silently. Aim for 2,300–2,800 tokens: above the threshold, comprehensive enough to anchor all agents, not so large that cache-read costs climb. The title and subtitle are not part of the cached block.
 
 ---
 
@@ -443,28 +443,34 @@ The following problems share structural features with the climbing grading syste
 The following optimisations are implemented and active by default. All are designed to reduce cost without affecting research output quality.
 
 ### Shared cached brief block
-All five brief fields are concatenated into a single cached block (typically 1500–2000 tokens) sent with every generation and debate call. Cache eligibility requires a minimum of 1024 tokens — the combined brief is designed to comfortably exceed this. Cache TTL is 5 minutes.
+All brief fields are concatenated into a single cached block sent with every generation and debate call. **The combined brief must exceed 2,048 tokens** to qualify for caching on Claude Sonnet 4.6 — this is the model-specific minimum, not the 1,024 figure sometimes cited for older models. If the threshold is not met, the API silently skips caching with no error, and every call pays full input price. The default climbing grading brief is ~2,300 tokens, giving a comfortable 250-token margin. Cache TTL is 5 minutes.
+
+### Writing a brief that keeps costs down
+The brief is the largest single cost driver in the tool. Two principles apply:
+
+**Keep it above the caching threshold.** The combined brief (problem context + research context + available data) must exceed 2,048 tokens (~8,000 characters) for Sonnet 4.6. Below this threshold every call pays full input price; above it the brief costs ~10× less per call after the first. If your brief is short, expand the research context with genuine domain knowledge — benchmark examples, prior theoretical frameworks, specific empirical observations. This both activates caching and improves agent output quality.
+
+**Don't pad unnecessarily beyond ~3,000 tokens.** The cache write fee is charged once per session start. Larger briefs cost more to write and more to read (at cache-read rates). A brief of 2,300–2,800 tokens is the practical sweet spot: comfortably above the threshold, comprehensive enough to anchor all agents, not so large that the cache-read cost per call becomes significant.
+
+**Mandates are billed at full price per call** — they are intentionally kept outside the cached block so that editing one agent's mandate does not invalidate the shared cache for all other agents. Keep individual mandates under ~300 tokens (~1,200 characters) each.
+
+### Primer-then-parallel generation
+Cache entries only become available after a response begins streaming — they are not available for concurrent parallel requests. To exploit this, agent[0] runs alone first (writing the cache), then agents[1–N] run in parallel (reading from the warm cache). This adds the latency of one serial agent call at the start of each generation round but saves ~90% of the brief input cost for all subsequent agents.
 
 ### Mandate as uncached second block
-The agent mandate follows the cached brief as a separate, uncached block. This means editing one agent's mandate does not invalidate the shared cache for other agents' calls.
-
-### Parallel generation
-All selected agents run simultaneously in parallel, not sequentially. The first call to the API writes the cache; all subsequent calls within the same round hit it. There is no serial dependency between generation calls.
+The agent mandate follows the cached brief as a separate, uncached block. Editing one agent's mandate does not invalidate the shared cache for other agents' calls. All ten agents share a single cache entry, written once and read nine times per generation round.
 
 ### Debate batching
 When an agent is assigned multiple debate partners, all debates are batched into a single API call. The agent receives all partner outputs in one user message and responds to each in a labelled section. This reduces API calls proportionally to the number of multi-partner agents (e.g. an agent with 3 partners: 3 calls → 1 call).
 
 ### Two-stage synthesis compression
-For post-debate synthesis, generation outputs are first compressed to ~80 words each in a single batched API call (one call, all outputs, cached brief block). The compressed summaries replace full generation outputs in the synthesis input. Debate outputs are passed at full length. This prevents synthesis input from growing unboundedly as rounds accumulate.
-
-### Synthesis uses brief-only cached block
-The synthesis call caches the shared brief block without any agent mandate, since the synthesis agent's role is not specialist but integrative.
+For post-debate synthesis, generation outputs are first compressed to ~80 words each in a single batched Haiku call. The compressed summaries replace full generation outputs in the synthesis input. Debate outputs are passed at full length. This prevents synthesis input from growing unboundedly as rounds accumulate.
 
 ### Haiku for low-reasoning tasks
-Generation compression (summarising each agent's output to ~80 words) and mandate generation (drafting a new agent mandate from the brief) are simple tasks where reasoning depth does not affect quality. Both use Haiku, which costs approximately 4× less than Sonnet for input and output tokens.
+Generation compression and mandate generation use Haiku (~4× cheaper than Sonnet for input and output tokens). These are simple summarisation and drafting tasks where reasoning depth does not affect quality.
 
 ### Improved depth instructions
-Each depth setting now includes explicit reasoning style guidance — not just word count, but what kind of reasoning to prioritise. Brief depth prioritises tractability and conciseness; detailed depth asks for identification of key unknowns and implications; exhaustive depth requires sketched equations, anticipation of objections, and empirical resolution proposals. This produces more meaningfully differentiated outputs across depth settings at no additional token cost.
+Each depth setting includes explicit reasoning style guidance alongside word count. Brief prioritises tractability; detailed asks for key unknowns and implications; exhaustive requires sketched equations, anticipation of objections, and empirical resolution proposals. This produces more meaningfully differentiated outputs at no additional token cost.
 
 ---
 
