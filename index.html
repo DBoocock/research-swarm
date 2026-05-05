@@ -1,0 +1,1690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research Swarm</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Instrument+Serif:ital@0;1&display=swap');
+:root{
+  --bg:#0e0e0f;--bg2:#151517;--bg3:#1c1c1f;--bg4:#232327;
+  --border:#2a2a2f;--border2:#38383f;
+  --text:#e8e6e0;--text2:#9a9890;--text3:#5a5856;
+  --accent:#c8b97a;--accent2:#8fb8a0;--accent3:#7a9fc8;
+  --danger:#c87a7a;--warn:#c8a07a;--success:#7ac888;--cache:#b87ac8;
+  --mono:'DM Mono',monospace;--serif:'Instrument Serif',serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;line-height:1.6;min-height:100vh;}
+.app{display:flex;height:100vh;overflow:hidden;}
+
+/* ── Sidebar ── */
+.sidebar{width:296px;min-width:296px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+
+/* Header — clickable to open brief editor */
+.sidebar-header{padding:14px 16px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;position:relative;}
+.sidebar-header:hover{background:var(--bg3);}
+.sidebar-header h1{font-family:var(--serif);font-size:17px;font-weight:400;font-style:italic;color:var(--accent);line-height:1.3;margin-bottom:3px;}
+.sidebar-header p{font-size:11px;color:var(--text3);line-height:1.4;}
+.sidebar-header-hint{font-size:9px;color:var(--text3);margin-top:5px;letter-spacing:.04em;opacity:.7;}
+.header-edit-icon{position:absolute;top:12px;right:12px;font-size:10px;color:var(--text3);opacity:.5;}
+.sidebar-header:hover .header-edit-icon{opacity:1;color:var(--accent);}
+
+.api-row{padding:9px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:4px;}
+.field-label{font-size:10px;color:var(--text3);letter-spacing:.07em;text-transform:uppercase;}
+.api-input{background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:5px 8px;border-radius:4px;width:100%;outline:none;transition:border-color .15s;}
+.api-input:focus{border-color:var(--border2);}
+.api-input::placeholder{color:var(--text3);}
+
+/* Cost panel */
+.cost-panel{padding:8px 16px;border-bottom:1px solid var(--border);}
+.cost-panel-hdr{font-size:10px;color:var(--text3);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;}
+.cost-panel-hdr button{font-family:var(--mono);font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;text-decoration:underline;}
+.cost-panel-hdr button:hover{color:var(--text2);}
+.cost-total{display:flex;align-items:baseline;gap:6px;margin-bottom:6px;}
+.cost-amount{font-size:18px;font-weight:500;color:var(--text);}
+.cost-sublabel{font-size:11px;color:var(--text3);}
+.cost-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;}
+.cc{background:var(--bg3);border-radius:3px;padding:4px 7px;display:flex;flex-direction:column;}
+.cc-label{font-size:9px;color:var(--text3);letter-spacing:.04em;margin-bottom:1px;}
+.cc-val{font-size:11px;color:var(--text2);}
+.cc.ch .cc-label{color:var(--cache);}.cc.ch .cc-val{color:var(--cache);}
+.cc.sv{grid-column:span 2;}.cc.sv .cc-label{color:var(--success);}.cc.sv .cc-val{color:var(--success);}
+.cache-bar-wrap{margin-top:5px;}
+.cache-bar-lbl{font-size:9px;color:var(--text3);margin-bottom:2px;display:flex;justify-content:space-between;}
+.cache-bar-track{height:3px;background:var(--bg4);border-radius:2px;overflow:hidden;}
+.cache-bar-fill{height:100%;background:var(--cache);border-radius:2px;transition:width .4s;}
+.call-log{margin-top:5px;max-height:60px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;}
+.cli{font-size:10px;color:var(--text3);display:flex;justify-content:space-between;align-items:center;padding:1px 0;border-bottom:1px solid var(--border);}
+.cli:last-child{border:none;}
+.cli-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cli-cost{flex-shrink:0;margin-left:4px;}
+.cli-cache{color:var(--cache);font-size:9px;flex-shrink:0;margin-left:3px;}
+
+/* Agent section */
+.sidebar-section{padding:7px 16px 5px;border-bottom:1px solid var(--border);}
+.ss-hdr{font-size:10px;letter-spacing:.08em;color:var(--text3);text-transform:uppercase;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;gap:4px;}
+.ss-hdr-btns{display:flex;gap:4px;align-items:center;flex-shrink:0;}
+.ss-btn{font-family:var(--mono);font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;text-decoration:underline;}
+.ss-btn:hover{color:var(--text2);}
+.icon-btn{font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--border);border-radius:3px;background:none;color:var(--text3);cursor:pointer;transition:all .1s;}
+.icon-btn:hover{color:var(--text2);border-color:var(--border2);}
+.icon-btn.primary{background:rgba(200,185,122,.1);color:var(--accent);border-color:rgba(200,185,122,.3);}
+.icon-btn.primary:hover{background:rgba(200,185,122,.2);}
+.agents-scroll{overflow-y:auto;max-height:170px;}
+.agent-list{display:flex;flex-direction:column;gap:2px;}
+.agent-item{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:4px;cursor:pointer;transition:background .1s;border:1px solid transparent;position:relative;}
+.agent-item:hover{background:var(--bg3);}
+.agent-item.selected{background:var(--bg3);border-color:var(--border);}
+.agent-item.retired{opacity:.35;}
+.agent-item.genonly{opacity:.7;}
+.agent-item.promoted{border-color:var(--accent);}
+.agent-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.agent-name-text{font-size:11px;color:var(--text2);flex:1;line-height:1.3;}
+.agent-item.selected .agent-name-text{color:var(--text);}
+.agent-status-pill{font-size:9px;padding:1px 4px;border-radius:10px;}
+.asp-retired{background:var(--bg4);color:var(--text3);}
+.asp-promoted{background:rgba(200,185,122,.15);color:var(--accent);}
+.asp-active{background:rgba(143,184,160,.12);color:var(--accent2);}
+.asp-genonly{background:rgba(122,158,200,.1);color:var(--accent3);}
+.agent-actions{display:none;gap:3px;flex-shrink:0;}
+.agent-item:hover .agent-actions{display:flex;}
+.agent-action-btn{font-size:9px;padding:1px 5px;border:1px solid var(--border);border-radius:2px;background:none;color:var(--text3);cursor:pointer;font-family:var(--mono);}
+.agent-action-btn:hover{color:var(--text2);}
+.agent-action-btn.del:hover{color:var(--danger);border-color:var(--danger);}
+.agent-debate-count{font-size:9px;color:var(--text3);flex-shrink:0;}
+
+/* Depth + run */
+.depth-row{display:flex;gap:3px;}
+.depth-btn{flex:1;font-family:var(--mono);font-size:11px;padding:4px 2px;background:var(--bg3);border:1px solid var(--border);color:var(--text3);cursor:pointer;border-radius:3px;transition:all .1s;text-align:center;}
+.depth-btn:hover{color:var(--text2);border-color:var(--border2);}
+.depth-btn.active{background:var(--bg4);border-color:var(--border2);color:var(--text);}
+.run-btn{margin:8px 16px;padding:8px;font-family:var(--mono);font-size:12px;background:var(--accent);color:var(--bg);border:none;border-radius:4px;cursor:pointer;transition:opacity .15s;letter-spacing:.03em;font-weight:500;}
+.run-btn:hover{opacity:.85;}
+.run-btn:disabled{opacity:.3;cursor:not-allowed;}
+.sidebar-footer{margin-top:auto;padding:6px 16px;border-top:1px solid var(--border);font-size:10px;color:var(--text3);line-height:1.5;}
+
+/* Main */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.tab-bar{display:flex;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 8px;flex-shrink:0;overflow-x:auto;}
+.tab{font-family:var(--mono);font-size:11px;padding:8px 10px;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .1s;background:none;border-top:none;border-left:none;border-right:none;letter-spacing:.03em;white-space:nowrap;}
+.tab:hover{color:var(--text2);}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tab-count{display:inline-block;background:var(--bg4);color:var(--text3);font-size:9px;padding:1px 4px;border-radius:10px;margin-left:3px;}
+.tab.active .tab-count{background:rgba(200,185,122,.15);color:var(--accent);}
+.panel{display:none;flex:1;overflow-y:auto;padding:12px;flex-direction:column;gap:8px;}
+.panel.active{display:flex;}
+
+/* Cards */
+.round-hdr{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:5px;flex-shrink:0;}
+.round-lbl{font-size:10px;letter-spacing:.1em;color:var(--text3);text-transform:uppercase;}
+.round-title{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--text2);}
+.round-status{margin-left:auto;font-size:10px;padding:2px 7px;border-radius:10px;}
+.rs-running{background:rgba(122,158,200,.15);color:var(--accent3);}
+.rs-done{background:rgba(122,200,136,.12);color:var(--success);}
+.rs-error{background:rgba(200,122,122,.1);color:var(--danger);}
+
+.rcard{background:var(--bg2);border:1px solid var(--border);border-radius:5px;overflow:hidden;flex-shrink:0;}
+.rcard-hdr{display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--border);background:var(--bg3);}
+.rcard-title{font-size:11px;color:var(--text2);flex:1;}
+.badge{font-size:9px;padding:1px 5px;border-radius:10px;letter-spacing:.04em;}
+.b-run{background:rgba(122,158,200,.15);color:var(--accent3);}
+.b-done{background:rgba(122,200,136,.12);color:var(--success);}
+.b-pend{background:var(--bg4);color:var(--text3);}
+.b-deb{background:rgba(200,160,122,.15);color:var(--warn);}
+.rcard-cost{font-size:10px;color:var(--text3);margin-left:3px;}
+.rcard-cache{font-size:9px;color:var(--cache);margin-left:2px;}
+.rcard-body{padding:11px 12px;font-size:12px;color:var(--text2);line-height:1.75;white-space:pre-wrap;font-family:var(--mono);}
+
+.synth-card{background:var(--bg2);border:1px solid var(--accent);border-radius:5px;overflow:hidden;flex-shrink:0;}
+.synth-hdr{display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--border);background:rgba(200,185,122,.04);}
+.synth-title{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--accent);flex:1;}
+
+.cursor{display:inline-block;width:7px;height:13px;background:var(--accent);vertical-align:middle;margin-left:2px;animation:blink .9s step-end infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* Pairings */
+.pair-panel{background:var(--bg2);border:1px solid var(--border2);border-radius:5px;overflow:hidden;flex-shrink:0;}
+.pair-panel-hdr{padding:8px 13px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px;}
+.pair-list{padding:6px 12px;display:flex;flex-direction:column;gap:5px;}
+.pair-item{display:flex;align-items:flex-start;gap:7px;padding:7px 9px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;}
+.pair-item.on{border-color:var(--border2);}
+.pair-item.off{opacity:.45;}
+.ptoggle{width:14px;height:14px;border:1px solid var(--border2);border-radius:3px;background:var(--bg4);cursor:pointer;flex-shrink:0;margin-top:2px;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--accent2);transition:all .1s;}
+.ptoggle.on{background:rgba(143,184,160,.2);border-color:var(--accent2);}
+.pair-agents{font-size:11px;margin-bottom:2px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.pat{padding:1px 6px;border-radius:10px;font-size:10px;}
+.ptb{font-size:9px;padding:1px 5px;border-radius:10px;letter-spacing:.04em;flex-shrink:0;}
+.pt-c{background:rgba(200,122,122,.15);color:var(--danger);}
+.pt-i{background:rgba(122,158,200,.15);color:var(--accent3);}
+.pt-d{background:rgba(200,160,122,.15);color:var(--warn);}
+.pt-b{background:rgba(143,184,160,.12);color:var(--accent2);}
+.pair-reason{font-size:11px;color:var(--text3);line-height:1.5;font-style:italic;}
+.rp-sec{padding:6px 12px 10px;border-top:1px solid var(--border);}
+.rp-lbl{font-size:10px;letter-spacing:.08em;color:var(--text3);text-transform:uppercase;margin-bottom:4px;}
+.rp-item{display:flex;align-items:flex-start;gap:6px;padding:6px 8px;background:var(--bg3);border-radius:4px;border:1px solid var(--border);margin-bottom:4px;}
+.rp-action{font-size:10px;padding:1px 5px;border-radius:10px;flex-shrink:0;margin-top:1px;}
+.rpa-retire{background:rgba(200,122,122,.12);color:var(--danger);}
+.rpa-promote{background:rgba(200,185,122,.12);color:var(--accent);}
+.rpa-genonly{background:rgba(122,158,200,.1);color:var(--accent3);}
+.rp-text{font-size:11px;color:var(--text3);line-height:1.4;flex:1;}
+.rp-text strong{color:var(--text2);font-weight:500;}
+.rp-btn{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:3px;border:1px solid var(--border2);background:var(--bg4);color:var(--text3);cursor:pointer;flex-shrink:0;transition:all .1s;}
+.rp-btn:hover{color:var(--text);}
+.rp-btn.accepted{background:rgba(122,200,136,.1);color:var(--success);border-color:rgba(122,200,136,.3);}
+.launch-btn{margin:8px 12px 10px;padding:8px;font-family:var(--mono);font-size:12px;background:rgba(200,185,122,.1);color:var(--accent);border:1px solid rgba(200,185,122,.3);border-radius:4px;cursor:pointer;transition:all .15s;letter-spacing:.03em;}
+.launch-btn:hover{background:rgba(200,185,122,.18);}
+
+/* Research map */
+.map-entry{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:8px 11px;display:flex;flex-direction:column;gap:4px;flex-shrink:0;}
+.me-hdr{display:flex;gap:6px;align-items:flex-start;}
+.me-title{font-size:12px;color:var(--text);flex:1;line-height:1.4;}
+.me-meta{font-size:10px;color:var(--text3);white-space:nowrap;}
+.tag-row{display:flex;gap:3px;flex-wrap:wrap;}
+.tag-btn{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:10px;border:1px solid var(--border);background:var(--bg4);color:var(--text3);cursor:pointer;transition:all .1s;}
+.tag-btn:hover{border-color:var(--border2);color:var(--text2);}
+.tb-pursue{background:rgba(122,200,136,.12);color:var(--success);border-color:rgba(122,200,136,.3);}
+.tb-revisit{background:rgba(122,158,200,.12);color:var(--accent3);border-color:rgba(122,158,200,.3);}
+.tb-needs{background:rgba(200,160,122,.12);color:var(--warn);border-color:rgba(200,160,122,.3);}
+.tb-blocked{background:rgba(200,122,122,.1);color:var(--danger);border-color:rgba(200,122,122,.25);}
+
+/* Contradictions */
+.contra-item{background:var(--bg2);border:1px solid rgba(200,122,122,.25);border-radius:4px;padding:8px 11px;flex-shrink:0;}
+.contra-agents{display:flex;gap:5px;align-items:center;margin-bottom:4px;flex-wrap:wrap;}
+.contra-vs{font-size:10px;color:var(--text3);}
+.contra-text{font-size:12px;color:var(--text2);line-height:1.6;}
+.contra-res{font-size:11px;color:var(--text3);margin-top:4px;font-style:italic;}
+
+/* Matrix */
+.matrix-grid{display:grid;grid-template-columns:78px 1fr 1fr;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:4px;overflow:hidden;flex-shrink:0;}
+.mcell{background:var(--bg2);padding:7px 9px;font-size:11px;}
+.mhdr{background:var(--bg3);color:var(--text3);font-size:10px;letter-spacing:.08em;text-transform:uppercase;}
+.maxs{background:var(--bg3);color:var(--text3);font-size:10px;display:flex;align-items:center;}
+.mquad{display:flex;flex-direction:column;gap:3px;}
+.mitem{font-size:10px;padding:2px 6px;border-radius:3px;border-left:2px solid;background:var(--bg3);color:var(--text2);line-height:1.4;}
+
+/* Overlap matrix */
+.overlap-grid{display:grid;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:4px;overflow:hidden;flex-shrink:0;}
+.og-cell{background:var(--bg2);padding:5px;font-size:10px;text-align:center;display:flex;align-items:center;justify-content:center;}
+.og-hdr{background:var(--bg3);color:var(--text3);font-size:9px;writing-mode:vertical-rl;transform:rotate(180deg);padding:6px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-height:80px;}
+.og-row-lbl{background:var(--bg3);color:var(--text3);font-size:9px;padding:4px 6px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.og-score{border-radius:3px;width:100%;height:100%;min-height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;}
+
+/* Session log */
+.log-entry{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden;flex-shrink:0;}
+.log-entry-hdr{padding:7px 12px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:7px;}
+.log-entry-body{padding:10px 12px;font-size:11px;color:var(--text3);line-height:1.65;white-space:pre-wrap;}
+
+/* Modals */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;display:flex;align-items:center;justify-content:center;}
+.modal-bg.hidden{display:none;}
+.modal{background:var(--bg2);border:1px solid var(--border2);border-radius:6px;display:flex;flex-direction:column;overflow:hidden;max-height:90vh;}
+.modal-lg{width:800px;max-width:96vw;}
+.modal-md{width:560px;max-width:96vw;}
+.modal-hdr{padding:11px 15px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:9px;flex-shrink:0;}
+.modal-title{font-family:var(--serif);font-style:italic;font-size:16px;color:var(--accent);flex:1;}
+.modal-close{font-family:var(--mono);font-size:11px;color:var(--text3);background:none;border:1px solid var(--border);padding:3px 8px;border-radius:3px;cursor:pointer;}
+.modal-close:hover{color:var(--text);}
+.modal-body{flex:1;overflow-y:auto;padding:13px 15px;display:flex;flex-direction:column;gap:11px;}
+.modal-notice{font-size:11px;color:var(--accent3);padding:7px 10px;background:rgba(122,158,200,.07);border:1px solid rgba(122,158,200,.2);border-radius:4px;line-height:1.5;}
+.modal-field-lbl{font-size:10px;letter-spacing:.08em;color:var(--text3);text-transform:uppercase;margin-bottom:4px;}
+.modal-input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 9px;border-radius:4px;outline:none;transition:border-color .15s;}
+.modal-input:focus{border-color:var(--border2);}
+.modal-textarea{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px 9px;border-radius:4px;resize:vertical;line-height:1.65;outline:none;transition:border-color .15s;}
+.modal-textarea:focus{border-color:var(--border2);}
+.modal-footer{padding:9px 15px;border-top:1px solid var(--border);display:flex;gap:7px;justify-content:flex-end;flex-shrink:0;}
+.mbtn{font-family:var(--mono);font-size:11px;padding:6px 13px;border-radius:4px;cursor:pointer;transition:all .1s;}
+.mbtn-p{background:var(--accent);color:var(--bg);border:none;}
+.mbtn-p:hover{opacity:.85;}
+.mbtn-s{background:none;border:1px solid var(--border2);color:var(--text3);}
+.mbtn-s:hover{color:var(--text);}
+.mbtn-d{background:rgba(200,122,122,.1);border:1px solid rgba(200,122,122,.3);color:var(--danger);}
+
+/* Roster agent cards */
+.roster-suggestion{background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;}
+.rs-hdr{display:flex;align-items:center;gap:8px;}
+.rs-name{font-size:12px;color:var(--text);flex:1;}
+.rs-mandate-preview{font-size:11px;color:var(--text3);line-height:1.5;max-height:60px;overflow:hidden;}
+.rs-actions{display:flex;gap:5px;}
+
+/* Colour swatches */
+.color-grid{display:flex;flex-wrap:wrap;gap:5px;}
+.color-swatch{width:20px;height:20px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:border-color .1s;}
+.color-swatch.selected{border-color:var(--text);}
+
+/* Misc */
+.empty-state{padding:32px 20px;text-align:center;color:var(--text3);font-size:12px;line-height:1.7;}
+.empty-state .big{font-family:var(--serif);font-style:italic;font-size:19px;color:var(--text3);display:block;margin-bottom:7px;}
+::-webkit-scrollbar{width:3px;} ::-webkit-scrollbar-track{background:transparent;} ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec-label{font-size:10px;letter-spacing:.1em;color:var(--text3);text-transform:uppercase;padding:2px 0 5px;flex-shrink:0;}
+.notice{padding:7px 11px;background:rgba(122,158,200,.07);border:1px solid rgba(122,158,200,.2);border-radius:4px;font-size:11px;color:var(--accent3);line-height:1.5;flex-shrink:0;}
+.tab-actions{display:flex;gap:4px;margin-left:auto;padding:4px 6px 4px 4px;align-items:center;flex-shrink:0;}
+.sm-btn{font-family:var(--mono);font-size:10px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);color:var(--text3);border-radius:3px;cursor:pointer;transition:all .1s;white-space:nowrap;}
+.sm-btn:hover{color:var(--text2);border-color:var(--border2);}
+.divider{height:1px;background:var(--border);flex-shrink:0;}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ══ SIDEBAR ══ -->
+<aside class="sidebar">
+  <div class="sidebar-header" onclick="openBriefModal()" title="Click to edit title, subtitle and research brief">
+    <span class="header-edit-icon">✎</span>
+    <h1 id="swarm-title">Grade Dynamics<br>Research Swarm</h1>
+    <p id="swarm-subtitle">Multi-agent theoretical exploration of community climb grading systems</p>
+    <div class="sidebar-header-hint">click to edit brief ↑</div>
+  </div>
+
+  <div class="api-row">
+    <label class="field-label">Anthropic API Key</label>
+    <input type="password" class="api-input" id="api-key" placeholder="sk-ant-..." autocomplete="off">
+  </div>
+
+  <div class="cost-panel">
+    <div class="cost-panel-hdr"><span>Session cost</span><button onclick="resetCost()">reset</button></div>
+    <div class="cost-total"><span class="cost-amount" id="cost-total">$0.0000</span><span class="cost-sublabel">this session</span></div>
+    <div class="cost-grid">
+      <div class="cc"><span class="cc-label">Input tok</span><span class="cc-val" id="ci">0</span></div>
+      <div class="cc"><span class="cc-label">Output tok</span><span class="cc-val" id="co">0</span></div>
+      <div class="cc ch"><span class="cc-label">Cache reads</span><span class="cc-val" id="ccr">0</span></div>
+      <div class="cc"><span class="cc-label">Cache writes</span><span class="cc-val" id="ccw">0</span></div>
+      <div class="cc sv"><span class="cc-label">Saved via caching</span><span class="cc-val" id="cs">$0.0000</span></div>
+    </div>
+    <div class="cache-bar-wrap">
+      <div class="cache-bar-lbl"><span>Cache hit rate</span><span id="cpct">0%</span></div>
+      <div class="cache-bar-track"><div class="cache-bar-fill" id="cbar"></div></div>
+    </div>
+    <div class="call-log" id="call-log"></div>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="ss-hdr">
+      <span>Agents</span>
+      <div class="ss-hdr-btns">
+        <button class="ss-btn" onclick="selectAll()">all</button>
+        <button class="ss-btn" onclick="selectNone()">none</button>
+        <button class="icon-btn primary" onclick="openRosterModal()">roster ✦</button>
+        <button class="icon-btn" onclick="openNewAgentModal()">+ new</button>
+      </div>
+    </div>
+    <div class="agents-scroll"><div class="agent-list" id="agent-list"></div></div>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="ss-hdr"><span>Depth</span></div>
+    <div class="depth-row">
+      <button class="depth-btn" onclick="setDepth('brief',this)">brief</button>
+      <button class="depth-btn active" onclick="setDepth('detailed',this)">detailed</button>
+      <button class="depth-btn" onclick="setDepth('exhaustive',this)">exhaustive</button>
+    </div>
+  </div>
+
+  <button class="run-btn" id="run-btn" onclick="runGen()">run generation round →</button>
+  <div class="sidebar-footer" id="status">Ready. Add API key and select agents to begin.</div>
+</aside>
+
+<!-- ══ MAIN ══ -->
+<main class="main">
+  <div class="tab-bar">
+    <button class="tab active" onclick="switchTab('gen')" id="tab-gen">Generation <span class="tab-count" id="tc-gen">0</span></button>
+    <button class="tab" onclick="switchTab('deb')" id="tab-deb">Debate <span class="tab-count" id="tc-deb">0</span></button>
+    <button class="tab" onclick="switchTab('syn')" id="tab-syn">Synthesis <span class="tab-count" id="tc-syn">0</span></button>
+    <button class="tab" onclick="switchTab('pair')" id="tab-pair">Next Round <span class="tab-count" id="tc-pair">0</span></button>
+    <button class="tab" onclick="switchTab('map')" id="tab-map">Research Map <span class="tab-count" id="tc-map">0</span></button>
+    <button class="tab" onclick="switchTab('contra')" id="tab-contra">Contradictions <span class="tab-count" id="tc-contra">0</span></button>
+    <button class="tab" onclick="switchTab('matrix')" id="tab-matrix">Matrix</button>
+    <button class="tab" onclick="switchTab('overlap')" id="tab-overlap">Overlap</button>
+    <button class="tab" onclick="switchTab('log')" id="tab-log">Log <span class="tab-count" id="tc-log">0</span></button>
+    <div class="tab-actions">
+      <input type="file" id="import-file" accept=".json" style="display:none" onchange="importSession(event)">
+      <button class="sm-btn" onclick="document.getElementById('import-file').click()">import session</button>
+      <button class="sm-btn" onclick="exportMd()">export md</button>
+      <button class="sm-btn" onclick="exportJson()">export json</button>
+    </div>
+  </div>
+
+  <div class="panel active" id="panel-gen"><div class="empty-state"><span class="big">Generation round</span>Each active agent proposes research directions in parallel.<br>Configure agents and depth in the sidebar, then run.</div></div>
+  <div class="panel" id="panel-deb"><div class="empty-state"><span class="big">Debate round</span>Agents engage their assigned partners — multiple pairings per agent allowed.<br>Run generation first, then configure pairs in Next Round tab.</div></div>
+  <div class="panel" id="panel-syn"><div class="empty-state"><span class="big">Synthesis</span>Arbitration agent reads all outputs and identifies convergences, tensions,<br>tractable steps, and blind spots.</div></div>
+  <div class="panel" id="panel-pair"><div class="empty-state"><span class="big">Next round pairings</span>Meta-agent proposals appear here after synthesis. Review and launch.</div></div>
+  <div class="panel" id="panel-map"><div class="empty-state"><span class="big">Research map</span>Tagged directions accumulate across all rounds.</div></div>
+  <div class="panel" id="panel-contra"><div class="empty-state"><span class="big">Contradiction tracker</span>Incompatible claims accumulate here across rounds.</div></div>
+  <div class="panel" id="panel-matrix"><div class="empty-state"><span class="big">Depth / tractability matrix</span>Latest synthesis directions plotted by depth and tractability.</div></div>
+  <div class="panel" id="panel-overlap"><div class="empty-state"><span class="big">Overlap matrix</span>Pairwise debate productivity estimated from mandate similarity and observed outputs.<br>Populated after first round.</div></div>
+  <div class="panel" id="panel-log"><div class="empty-state"><span class="big">Session log</span>Every round accumulates here. JSON and Markdown auto-exported after each synthesis.<br>Use <em>import session</em> in the tab bar to resume a previous session.</div></div>
+</main>
+</div>
+
+<!-- ══ BRIEF MODAL ══ -->
+<div class="modal-bg hidden" id="brief-modal">
+<div class="modal modal-lg">
+  <div class="modal-hdr">
+    <span class="modal-title">Edit swarm brief</span>
+    <button class="modal-close" onclick="closeBriefModal()">close</button>
+  </div>
+  <div class="modal-body">
+    <div class="modal-notice">The title, subtitle, and all brief fields are editable. The combined Problem context + Research context + Available data form a single cached block sent with every generation and debate call — editing any of them invalidates the cache and triggers a fresh cache write on the next run. Agent mandates are edited separately via the agent list.</div>
+    <div><div class="modal-field-lbl">Swarm title</div><input class="modal-input" id="edit-title" value="Grade Dynamics Research Swarm"></div>
+    <div><div class="modal-field-lbl">Subtitle</div><input class="modal-input" id="edit-subtitle" value="Multi-agent theoretical exploration of community climb grading systems"></div>
+    <div><div class="modal-field-lbl">Problem context</div><textarea class="modal-textarea" id="edit-sysCtx" rows="10"></textarea></div>
+    <div><div class="modal-field-lbl">Research context (domain knowledge, prior work)</div><textarea class="modal-textarea" id="edit-resCtx" rows="10"></textarea></div>
+    <div><div class="modal-field-lbl">Available data (only include data that is realistically obtainable)</div><textarea class="modal-textarea" id="edit-dataCtx" rows="6"></textarea></div>
+  </div>
+  <div class="modal-footer">
+    <button class="mbtn mbtn-s" onclick="closeBriefModal()">cancel</button>
+    <button class="mbtn mbtn-p" onclick="saveBrief()">save brief</button>
+  </div>
+</div>
+</div>
+
+<!-- ══ AGENT EDIT MODAL ══ -->
+<div class="modal-bg hidden" id="agent-modal">
+<div class="modal modal-md">
+  <div class="modal-hdr">
+    <span class="modal-title" id="agent-modal-title">Edit agent</span>
+    <button class="modal-close" onclick="closeAgentModal()">close</button>
+  </div>
+  <div class="modal-body">
+    <div><div class="modal-field-lbl">Agent name</div><input class="modal-input" id="edit-agent-name"></div>
+    <div>
+      <div class="modal-field-lbl">Colour</div>
+      <div class="color-grid" id="color-grid"></div>
+    </div>
+    <div>
+      <div class="modal-field-lbl">Mandate <button class="sm-btn" style="display:inline;margin-left:8px;" onclick="generateMandate()">✦ generate from brief</button></div>
+      <textarea class="modal-textarea" id="edit-agent-mandate" rows="14"></textarea>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="mbtn mbtn-d" id="delete-agent-btn" onclick="deleteCurrentAgent()">delete agent</button>
+    <button class="mbtn mbtn-s" onclick="closeAgentModal()">cancel</button>
+    <button class="mbtn mbtn-p" onclick="saveAgent()">save</button>
+  </div>
+</div>
+</div>
+
+<!-- ══ ROSTER MODAL ══ -->
+<div class="modal-bg hidden" id="roster-modal">
+<div class="modal modal-lg">
+  <div class="modal-hdr">
+    <span class="modal-title">Roster agent</span>
+    <button class="modal-close" onclick="closeRosterModal()">close</button>
+  </div>
+  <div class="modal-body" id="roster-modal-body">
+    <div class="modal-notice">The roster agent analyses your current brief and agent mandates to suggest: new agents to add, status changes (active / generation-only / retired), mandate drift corrections, and an overlap map showing predicted debate productivity between pairs.</div>
+    <button class="mbtn mbtn-p" onclick="runRosterAgent()" id="roster-run-btn">run roster agent ✦</button>
+    <div id="roster-results"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="mbtn mbtn-s" onclick="closeRosterModal()">close</button>
+  </div>
+</div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+// PRICING (Sonnet 4 per million tokens)
+// ══════════════════════════════════════════════════════════
+const P={inp:3/1e6, out:15/1e6, cw:3.75/1e6, cr:0.30/1e6};
+
+// ══════════════════════════════════════════════════════════
+// COLOURS
+// ══════════════════════════════════════════════════════════
+const COLOURS=['#7ac8c8','#c87ac8','#c8a07a','#7a9fc8','#a07ac8','#7ac87a',
+  '#c8c87a','#c87a7a','#7ac8a0','#c8b97a','#7ab8c8','#c87aa0',
+  '#a8c87a','#c8907a','#7a7ac8','#c8c8a0'];
+
+// ══════════════════════════════════════════════════════════
+// DEFAULT BRIEF
+// ══════════════════════════════════════════════════════════
+const DEF_SYS=`You are a research specialist contributing to a multi-agent theoretical exploration of the dynamics of community rock climb difficulty grading systems.
+
+SYSTEM DESCRIPTION:
+- Heterogeneous climbers with different strengths, weaknesses, and styles each attempt routes and propose personal grades
+- Only climbers who successfully complete a route can propose a grade — systematic selection bias: harder routes exclude lower-ability climbers from voting
+- Personal grade proposals are biased by the known consensus grade and recent proposals (anchoring/social herding)
+- Consensus grade = running average of personal proposals, updated with each new ascent
+- Route popularity is self-reinforcing: popular routes attract more ascents, generating more grade data but also more herding
+- Route quality correlates with popularity and frequency of attempts
+- Perceived relative difficulty among same-grade routes varies with climber ability level (rank-reversal effect)
+- Some climbers systematically over-grade; others systematically under-grade (individual bias)
+- Difficulty varies with weather, conditions, and season
+- Regional grading cultures differ systematically (some areas harder/softer on average)
+- Rock type and climbing style vary geographically due to geology
+- Grade inflation/deflation creates historical drift: older crags may feel sandbagged or soft relative to newer ones
+- Most climbers are local; a few elite destination crags attract global visitors
+
+Be specific, technically rigorous, and propose directions that would constitute genuine scientific contributions.`;
+
+const DEF_RES=`GRADE SCALE STRUCTURE:
+The French sport grading scale (widely adopted in Europe) combines a number and letter (a, b, c) with a "+" symbol: 6a, 6a+, 6b, 6b+, 6c, 6c+, 7a, 7a+, 7b, 7b+, 7c, 7c+, 8a, 8a+, etc. The grading scale discretises a conceptually continuous scale of perceived difficulty into discrete bands — the width and position of these bands are themselves emergent from the consensus voting dynamics, not externally fixed. Grade bands are not necessarily equal in width on the perceived difficulty scale.
+
+There may be a tendency to assign whole letter grades rather than "+" grades when proposing grades for new routes. Certain grades are more coveted — particularly those where a new number begins (7a, 8a, 9a) — meaning climbs at these grades may be attempted more often and for longer. A climber's first route at a given grade is often a soft example of that grade.
+
+ROUTE DECOMPOSITION — DARTH GRADER FRAMEWORK:
+The Darth Grader website (darth-grader.net) grades long climbs by decomposing them into shorter sections, grading each individually, then combining grades. Key observations:
+- Short sections (5-10 moves) use boulder grades (Font scale); long sections (>15 moves) use route grades (French sport scale)
+- Despite similar naming conventions, Font 7a ≠ French sport 7a in difficulty
+- Boulder-to-route conversion: ~+3.3 grades when boulder is FIRST (before endurance), ~+5 grades when AFTER endurance — reflecting the asymmetry that bouldering after being pumped is harder than being pumped after bouldering
+- The difficulty-grade relationship is proposed to be linear: Y = a·X + b, where slope 'a' is approximately constant across regions but intercept 'b' varies by region — formalising the concept of regional grading cultures
+- The "slash" phenomenon: some routes sit exactly at the boundary between two grades
+- To grade reliably, a climber should be in their "moderate comfort zone" — the route should be medium-hard for them. Psychophysical sensitivity is reduced at very easy (hyposensitivity) or near-maximum (hypersensitivity) difficulties
+- Regular ascent of benchmark routes serves as calibration of the climber's internal grading instrument
+
+ABILITY DISTRIBUTION:
+The distribution of climbing abilities is heavily skewed toward lower grades — many more beginners than experts. The votes of beginner and expert climbers receive equal weight in the consensus. A small group of elite professional climbers establishes routes of the very highest difficulty, extending the grading scale into new territory.`;
+
+const DEF_DATA=`AVAILABLE DATA:
+The following fields are obtainable from online ascent databases (8a.nu and ukclimbing.com/logbook/) subject to a research data agreement, which is anticipated to be obtainable via a polite request to the platform operators:
+- Ascentionist identity (enabling longitudinal tracking of individual climbers across routes and time)
+- Date of ascent
+- Personal grade proposed by the ascentionist
+- Consensus grade at the time of ascent
+- Location of the climb (crag, region, country)
+- Route quality rating
+
+Treat all research directions requiring this dataset as tractable — data access is a moderate practical step, not a fundamental barrier. Flag any direction requiring data not listed above (e.g. route physical feature measurements, climber physiological data) as requiring new data collection.`;
+
+// ══════════════════════════════════════════════════════════
+// DEFAULT AGENTS
+// ══════════════════════════════════════════════════════════
+const DEFAULT_AGENTS=[
+  {id:'stochastic',name:'Stochastic process modeler',color:'#7ac8c8',
+   mandate:`Specialise in stochastic processes applied to the climbing grade system: Markov chain models of grade proposal sequences, Fokker-Planck equations for how grade distributions diffuse and drift, Langevin dynamics (grade evolution as noisy gradient descent toward consensus), martingale theory (is consensus grade a fair estimator of true difficulty?), first-passage times (how long until a route's grade stabilises?), mean-field approximations for large populations. The noise is not incidental — it is the phenomenon. Focus on questions where stochastic structure qualitatively changes the answer vs. a deterministic model. Consider how discrete grade banding emerges from continuous stochastic dynamics, and how the skewed ability distribution affects sampling noise.`},
+  {id:'nonequil',name:'Non-equilibrium physics / info geometry',color:'#c87ac8',
+   mandate:`Specialise in non-equilibrium physics, stochastic thermodynamics, and information geometry: Jarzynski equality and Crooks fluctuation theorem (entropy production as KL divergence between forward/reverse path probabilities), Landauer's principle (anchoring to consensus as irreversible erasure of private information), stochastic thermodynamics of information flows between climber subpopulations, maximum entropy production as a principle governing grading culture evolution, Fisher information metric as the natural geometry on the space of grade distributions, dissipative adaptation (England) as a model for how grading communities self-organise. The free energy principle (Friston) may be relevant for modelling individual climber belief updating.`},
+  {id:'evolutionary',name:'Evolutionary dynamics / cultural evolution',color:'#c8a07a',
+   mandate:`Specialise in evolutionary dynamics, cultural evolution, and metapopulation biology: Price equation to decompose grade drift into selection and transmission components, replicator-mutator dynamics for grading norm evolution, niche construction (elite route setters construct the environment subsequent climbers adapt to — the small elite extending the grade scale frontier is an extreme case), multilevel selection (grades evolve simultaneously at climber, community, and global levels), metapopulation dynamics (climbing areas as semi-isolated demes connected by occasional migration of travelling climbers), isolation by distance (spatial autocorrelation of grading norms), founder effects at new crags, gene flow vs. local adaptation at elite travel hubs (Yosemite, Fontainebleau). Consider how coveted grade thresholds (7a, 8a, 9a) create selection pressure on grading norms around those boundaries.`},
+  {id:'bayesian',name:'Bayesian inference',color:'#7a9fc8',
+   mandate:`Specialise in Bayesian and probabilistic modelling: hierarchical Bayesian models treating grade proposals as noisy observations of latent true difficulty, prior anchoring (the consensus grade as an informative prior biasing individual proposals), Bayesian item response theory (climbers as raters with latent abilities, routes as items with latent difficulties), variational inference for tractable posterior approximation, Bayesian model comparison to test whether difficulty is scalar or multidimensional, Gaussian processes over route space. Address the censored likelihood from selection bias — only successful ascenders vote. The ascentionist identity field enables longitudinal modelling of individual climber bias. Consider the Darth Grader linear model Y=a·X+b as a prior structure worth testing empirically.`},
+  {id:'abm',name:'Agent-based simulation',color:'#a07ac8',
+   mandate:`Specialise in agent-based modelling: heterogeneous climber agents with distinct strength profiles, technique biases, home regions, and ability levels drawn from a realistically skewed ability distribution; route selection via preferential attachment modulated by quality, grade coveting effects at threshold grades (7a, 8a, 9a), and ability match; grade proposals with anchoring to current consensus and recent proposals; popularity feedback loops; regional grading cultures as emergent attractors. Key phenomena to reproduce: grade consensus formation and drift, rank-reversal effects, regional grading culture divergence, grade inflation/deflation, emergence of "slash" grades at band boundaries, and the tendency for climbers' first routes at a new grade to be soft examples.`},
+  {id:'dynamo',name:'Dynamical systems',color:'#7ac87a',
+   mandate:`Specialise in dynamical systems theory: consensus grade as a slow manifold in high-dimensional phase space, regional grading cultures as stable equilibria, grade drift as slow dynamics on this manifold, bifurcations (conditions under which a regional grading culture shifts discontinuously), hysteresis (why grade corrections are harder than grade inflation). The Darth Grader linear model Y=a·X+b suggests the system may have a simple attracting manifold with region-dependent offsets — analyse what determines the intercept b and when it shifts. Consider coveted grade thresholds (7a, 8a) as potential heteroclinic points or local attractors in the grade dynamics. Write schematic ODEs or difference equations.`},
+  {id:'network',name:'Network / sociology',color:'#c8c87a',
+   mandate:`Specialise in network science and computational sociology: the bipartite climber-route network (ascentionist identity enables construction of the full climber-route graph), information flow about grades through social networks, the role of elite travel hubs (Yosemite, Fontainebleau, Céüse) as high-degree nodes homogenising grading norms globally, community detection revealing regional grading cultures, spreading dynamics of grade proposals (SIR-like models), structural holes between regional communities where grade translation is most uncertain. The small elite extending the grade frontier has disproportionate authority. The skewed ability distribution creates a long-tail of low-influence voters whose collective signal is nonetheless large.`},
+  {id:'measurement',name:'Measurement theory',color:'#c87a7a',
+   mandate:`Specialise in measurement theory and psychophysics: whether climbing difficulty is a well-defined scalar or inherently multidimensional (strength vs. technique vs. endurance vs. fear vs. risk tolerance), rank-reversal effects across ability levels as direct evidence of multidimensionality, psychophysical models of perceived difficulty (Weber-Fechner law, Stevens power law, signal detection theory — Delignières 1991 specifically addresses climbing). The Darth Grader hyposensitivity/hypersensitivity model (climbers are poor graders at very easy or near-maximum difficulty) is a specific psychophysical claim worth formalising and testing. Address whether the grade scale is ordinal, interval, or ratio, and what the non-uniform emergence of grade band widths implies for measurement validity.`},
+  {id:'infotheory',name:'Information theory',color:'#7ac8a0',
+   mandate:`Specialise in information theory: the grade proposal process as a noisy communication channel (how much information about true difficulty survives consensus averaging?), channel capacity as a function of number of ascents and climber diversity, anchoring as information compression (private information irreversibly lost when climbers herd toward consensus), the selection bias as a censored channel, mutual information between route features and grades as a model-free decomposition of explainable vs. social variance, regional grading cultures as different codebooks (are they mutually decodable?). Consider also: how much information does knowing a route's Darth Grader section decomposition add beyond knowing only the consensus grade? The ascentionist identity enables Shannon entropy calculations over individual grading histories.`},
+  {id:'extremeval',name:'Statistical / extreme value theory',color:'#c8b97a',
+   mandate:`Specialise in extreme value theory and the statistics of rare events: the distribution of grades at the upper tail, generalised extreme value distributions for personal grade proposals at the limits of human ability, order statistics for the first ascent of a new maximum grade, the statistics of outlier proposals (when a single climber grades far from consensus, what does this reveal?), records theory (is the progression of hardest grades consistent with iid sampling from a stable distribution or does the underlying distribution shift?), and the sampling properties of grades for routes with very few ascents. The small elite group that extends the grade frontier is an extreme value phenomenon — the records of a particular distribution. Address whether coveted grade thresholds create clustering in the empirical grade distribution detectable as departures from a smooth extreme value distribution.`}
+];
+
+// ══════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════
+let brief={
+  title:'Grade Dynamics Research Swarm',
+  subtitle:'Multi-agent theoretical exploration of community climb grading systems',
+  sysCtx:DEF_SYS, resCtx:DEF_RES, dataCtx:DEF_DATA
+};
+
+let agents=[...DEFAULT_AGENTS.map(a=>({...a}))];
+
+let S={
+  depth:'detailed',
+  selectedAgents:new Set(DEFAULT_AGENTS.map(a=>a.id)),
+  agentStatuses:Object.fromEntries(DEFAULT_AGENTS.map(a=>[a.id,'active'])), // active|genonly|retired|promoted
+  currentRound:0, running:false,
+  currentGen:{}, currentDebate:{}, currentSynthesis:null,
+  pairingProposals:[], retirementProposals:[],
+  rounds:[],
+  researchMap:[], contradictions:[],
+  matrix:{dt:[],db:[],st:[],sb:[]},
+  overlapScores:{}, // "id1_id2" -> {static:0-1, observed:0-1|null}
+  editingAgentId:null
+};
+
+let costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[]};
+
+const DEPTH_DIRS={
+  brief:'Be concise — approximately 180 words. Propose 2 research directions with tight technical specificity.',
+  detailed:'Be thorough — approximately 320 words. Propose 2-3 research directions with clear technical detail.',
+  exhaustive:'Be exhaustive — approximately 500 words. Propose 3 research directions with full technical specification including sketched equations, model structures, or test designs.'
+};
+const DEPTH_WORDS={brief:150,detailed:250,exhaustive:400};
+
+// ══════════════════════════════════════════════════════════
+// BRIEF — build cached block
+// ══════════════════════════════════════════════════════════
+function buildCachedBlock(){
+  // Single cached block: all brief fields combined
+  // Typically ~1800+ tokens — well above the 1024 cache eligibility minimum
+  return brief.sysCtx+'\n\n'+brief.resCtx+'\n\n'+brief.dataCtx;
+}
+
+function agentSystemBlocks(mandate){
+  return[
+    {type:'text',text:buildCachedBlock(),cache_control:{type:'ephemeral'}},
+    {type:'text',text:'\n\nYOUR SPECIALIST MANDATE:\n'+mandate}
+  ];
+}
+
+function briefOnlyBlock(){
+  return[{type:'text',text:buildCachedBlock(),cache_control:{type:'ephemeral'}}];
+}
+
+// ══════════════════════════════════════════════════════════
+// COST
+// ══════════════════════════════════════════════════════════
+function resetCost(){costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[]};renderCost();}
+function addUsage(name,u){
+  const i=u.input_tokens||0,o=u.output_tokens||0,cw=u.cache_creation_input_tokens||0,cr=u.cache_read_input_tokens||0;
+  costS.inp+=i;costS.out+=o;costS.cw+=cw;costS.cr+=cr;
+  const c=i*P.inp+o*P.out+cw*P.cw+cr*P.cr;
+  const wc=(i+cr)*P.inp+o*P.out+cw*P.inp;
+  costS.total+=c;costS.saved+=Math.max(0,wc-c);
+  costS.calls.unshift({name:name.slice(0,24),cost:c,hit:cr>0,cr});
+  renderCost();
+}
+function renderCost(){
+  document.getElementById('cost-total').textContent='$'+costS.total.toFixed(4);
+  document.getElementById('ci').textContent=costS.inp.toLocaleString();
+  document.getElementById('co').textContent=costS.out.toLocaleString();
+  document.getElementById('ccr').textContent=costS.cr.toLocaleString();
+  document.getElementById('ccw').textContent=costS.cw.toLocaleString();
+  document.getElementById('cs').textContent='$'+costS.saved.toFixed(4);
+  const tot=costS.inp+costS.cr+costS.cw;
+  const pct=tot>0?Math.round(costS.cr/tot*100):0;
+  document.getElementById('cpct').textContent=pct+'%';
+  document.getElementById('cbar').style.width=pct+'%';
+  document.getElementById('call-log').innerHTML=costS.calls.slice(0,8).map(c=>
+    `<div class="cli"><span class="cli-name">${c.name}</span><span class="cli-cost">$${c.cost.toFixed(4)}</span>${c.hit?`<span class="cli-cache">⚡${c.cr.toLocaleString()}</span>`:''}</div>`
+  ).join('');
+}
+
+// ══════════════════════════════════════════════════════════
+// API
+// ══════════════════════════════════════════════════════════
+async function apiStream({name,systemBlocks,systemString,messages,onChunk,signal}){
+  const key=document.getElementById('api-key').value.trim();
+  if(!key)throw new Error('No API key entered.');
+  const body={model:'claude-sonnet-4-20250514',max_tokens:1200,stream:true,messages};
+  if(systemBlocks)body.system=systemBlocks;
+  else if(systemString)body.system=systemString;
+  const resp=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'prompt-caching-2024-07-31'},
+    body:JSON.stringify(body),signal
+  });
+  if(!resp.ok){const e=await resp.text();throw new Error(`API ${resp.status}: ${e.slice(0,200)}`);}
+  const reader=resp.body.getReader(),dec=new TextDecoder();
+  let buf='',result='',usage=null;
+  while(true){
+    const{done,value}=await reader.read();if(done)break;
+    buf+=dec.decode(value,{stream:true});
+    const lines=buf.split('\n');buf=lines.pop();
+    for(const line of lines){
+      if(!line.startsWith('data: '))continue;
+      const d=line.slice(6).trim();if(d==='[DONE]')continue;
+      try{
+        const j=JSON.parse(d);
+        if(j.type==='message_start'&&j.message?.usage)usage=j.message.usage;
+        if(j.type==='message_delta'&&j.usage)usage={...(usage||{}),...j.usage};
+        const t=j?.delta?.text||'';
+        if(t){result+=t;if(onChunk)onChunk(t);}
+      }catch{}
+    }
+  }
+  if(usage)addUsage(name||'call',usage);
+  return result;
+}
+
+// ══════════════════════════════════════════════════════════
+// SIDEBAR
+// ══════════════════════════════════════════════════════════
+function renderAgentList(){
+  const list=document.getElementById('agent-list');list.innerHTML='';
+  // Count debate assignments per agent from current pairing proposals
+  const debateCounts={};
+  S.pairingProposals.filter(p=>p.enabled).forEach(p=>{
+    debateCounts[p.id1]=(debateCounts[p.id1]||0)+1;
+    debateCounts[p.id2]=(debateCounts[p.id2]||0)+1;
+  });
+  agents.forEach(agent=>{
+    const status=S.agentStatuses[agent.id]||'active';
+    const sel=S.selectedAgents.has(agent.id);
+    const dc=debateCounts[agent.id]||0;
+    const div=document.createElement('div');
+    div.className=`agent-item ${sel?'selected':''} ${status}`;
+    div.onclick=e=>{if(!e.target.closest('.agent-actions'))toggleAgent(agent.id);};
+    const statusPill={active:'<span class="agent-status-pill asp-active">on</span>',
+      retired:'<span class="agent-status-pill asp-retired">retired</span>',
+      genonly:'<span class="agent-status-pill asp-genonly">gen only</span>',
+      promoted:'<span class="agent-status-pill asp-promoted">promoted</span>'}[status]||'';
+    div.innerHTML=`<span class="agent-dot" style="background:${agent.color}"></span>
+      <span class="agent-name-text">${agent.name}</span>
+      ${sel?statusPill:''}
+      ${dc>0?`<span class="agent-debate-count">${dc}↔</span>`:''}
+      <div class="agent-actions">
+        <button class="agent-action-btn" onclick="openAgentModal('${agent.id}')">edit</button>
+        <button class="agent-action-btn del" onclick="deleteAgent('${agent.id}',event)">×</button>
+      </div>`;
+    list.appendChild(div);
+  });
+}
+
+function toggleAgent(id){S.selectedAgents.has(id)?S.selectedAgents.delete(id):S.selectedAgents.add(id);renderAgentList();}
+function selectAll(){agents.forEach(a=>S.selectedAgents.add(a.id));renderAgentList();}
+function selectNone(){S.selectedAgents.clear();renderAgentList();}
+function setDepth(d,btn){S.depth=d;document.querySelectorAll('.depth-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+function switchTab(name){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('panel-'+name).classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+}
+function tc(t,n){const e=document.getElementById('tc-'+t);if(e)e.textContent=n;}
+function setStatus(t){document.getElementById('status').textContent=t;}
+
+// ══════════════════════════════════════════════════════════
+// BRIEF MODAL
+// ══════════════════════════════════════════════════════════
+function openBriefModal(){
+  document.getElementById('edit-title').value=brief.title;
+  document.getElementById('edit-subtitle').value=brief.subtitle;
+  document.getElementById('edit-sysCtx').value=brief.sysCtx;
+  document.getElementById('edit-resCtx').value=brief.resCtx;
+  document.getElementById('edit-dataCtx').value=brief.dataCtx;
+  document.getElementById('brief-modal').classList.remove('hidden');
+}
+function closeBriefModal(){document.getElementById('brief-modal').classList.add('hidden');}
+function saveBrief(){
+  const t=document.getElementById('edit-title').value.trim();
+  const st=document.getElementById('edit-subtitle').value.trim();
+  const changed=document.getElementById('edit-sysCtx').value!==brief.sysCtx||
+    document.getElementById('edit-resCtx').value!==brief.resCtx||
+    document.getElementById('edit-dataCtx').value!==brief.dataCtx;
+  brief.title=t;brief.subtitle=st;
+  brief.sysCtx=document.getElementById('edit-sysCtx').value;
+  brief.resCtx=document.getElementById('edit-resCtx').value;
+  brief.dataCtx=document.getElementById('edit-dataCtx').value;
+  document.getElementById('swarm-title').innerHTML=t.replace('\n','<br>');
+  document.getElementById('swarm-subtitle').textContent=st;
+  document.title=t;
+  closeBriefModal();
+  setStatus('Brief saved.'+(changed?' Cache will refresh on next run.':''));
+}
+
+// ══════════════════════════════════════════════════════════
+// AGENT MODAL (create / edit)
+// ══════════════════════════════════════════════════════════
+function buildColorGrid(selectedColor){
+  const grid=document.getElementById('color-grid');grid.innerHTML='';
+  COLOURS.forEach(c=>{
+    const used=agents.some(a=>a.color===c&&a.id!==S.editingAgentId);
+    const sw=document.createElement('div');
+    sw.className='color-swatch'+(c===selectedColor?' selected':'');
+    sw.style.background=c;sw.style.opacity=used?'.4':'1';
+    sw.title=c+(used?' (in use)':'');
+    sw.onclick=()=>{document.querySelectorAll('.color-swatch').forEach(s=>s.classList.remove('selected'));sw.classList.add('selected');};
+    grid.appendChild(sw);
+  });
+}
+
+function openAgentModal(id){
+  S.editingAgentId=id;
+  const agent=agents.find(a=>a.id===id);
+  document.getElementById('agent-modal-title').textContent='Edit agent: '+agent.name;
+  document.getElementById('edit-agent-name').value=agent.name;
+  document.getElementById('edit-agent-mandate').value=agent.mandate;
+  document.getElementById('delete-agent-btn').style.display='';
+  buildColorGrid(agent.color);
+  document.getElementById('agent-modal').classList.remove('hidden');
+}
+
+function openNewAgentModal(){
+  S.editingAgentId=null;
+  document.getElementById('agent-modal-title').textContent='New agent';
+  document.getElementById('edit-agent-name').value='';
+  document.getElementById('edit-agent-mandate').value='';
+  document.getElementById('delete-agent-btn').style.display='none';
+  const usedColors=new Set(agents.map(a=>a.color));
+  const free=COLOURS.find(c=>!usedColors.has(c))||COLOURS[Math.floor(Math.random()*COLOURS.length)];
+  buildColorGrid(free);
+  document.getElementById('agent-modal').classList.remove('hidden');
+}
+
+function closeAgentModal(){document.getElementById('agent-modal').classList.add('hidden');S.editingAgentId=null;}
+
+function saveAgent(){
+  const name=document.getElementById('edit-agent-name').value.trim();
+  const mandate=document.getElementById('edit-agent-mandate').value.trim();
+  const color=document.querySelector('.color-swatch.selected')?.style.background||COLOURS[0];
+  if(!name){alert('Agent name required.');return;}
+  if(S.editingAgentId){
+    const agent=agents.find(a=>a.id===S.editingAgentId);
+    agent.name=name;agent.mandate=mandate;agent.color=color;
+  } else {
+    const id='agent_'+Date.now();
+    agents.push({id,name,color,mandate});
+    S.agentStatuses[id]='active';
+    S.selectedAgents.add(id);
+  }
+  renderAgentList();
+  closeAgentModal();
+}
+
+function deleteCurrentAgent(){
+  if(!S.editingAgentId)return;
+  deleteAgent(S.editingAgentId,null);
+  closeAgentModal();
+}
+
+function deleteAgent(id,e){
+  if(e){e.stopPropagation();}
+  if(!confirm('Delete this agent? Their historical outputs will be preserved in the session log.'))return;
+  agents=agents.filter(a=>a.id!==id);
+  S.selectedAgents.delete(id);
+  delete S.agentStatuses[id];
+  renderAgentList();
+}
+
+async function generateMandate(){
+  const name=document.getElementById('edit-agent-name').value.trim();
+  if(!name){alert('Enter an agent name first.');return;}
+  const btn=document.querySelector('[onclick="generateMandate()"]');
+  btn.textContent='generating...';btn.disabled=true;
+  const existingMandates=agents.map(a=>`${a.name}: ${a.mandate.slice(0,120)}...`).join('\n');
+  const prompt=`Given the following research swarm brief and existing agent roster, write a specialist mandate for a new agent named "${name}".
+
+BRIEF:
+${buildCachedBlock()}
+
+EXISTING AGENTS (for context — the new agent should have a distinct, complementary perspective):
+${existingMandates}
+
+Write only the mandate text for "${name}" — approximately 120 words, technically specific, identifying the key frameworks and concepts this agent would bring. Do not include any preamble.`;
+  try{
+    let result='';
+    const ta=document.getElementById('edit-agent-mandate');
+    ta.value='';
+    await apiStream({
+      name:'mandate-gen',
+      systemString:'You are a research architect designing specialist agent mandates for a multi-agent research swarm.',
+      messages:[{role:'user',content:prompt}],
+      onChunk:chunk=>{result+=chunk;ta.value=result;}
+    });
+  }catch(e){alert('Error: '+e.message);}
+  btn.textContent='✦ generate from brief';btn.disabled=false;
+}
+
+// ══════════════════════════════════════════════════════════
+// GENERATION ROUND
+// ══════════════════════════════════════════════════════════
+async function runGen(){
+  if(S.running)return;
+  const activeAgents=agents.filter(a=>S.selectedAgents.has(a.id)&&S.agentStatuses[a.id]!=='retired'&&S.agentStatuses[a.id]!=='genonly');
+  const genOnlyAgents=agents.filter(a=>S.selectedAgents.has(a.id)&&S.agentStatuses[a.id]==='genonly');
+  const allGenAgents=[...activeAgents,...genOnlyAgents];
+  if(!allGenAgents.length){setStatus('Select at least one agent.');return;}
+  if(!document.getElementById('api-key').value.trim()){setStatus('Enter your API key first.');return;}
+  S.running=true;S.currentRound++;S.currentGen={};S.currentDebate={};
+  document.getElementById('run-btn').disabled=true;
+  const panel=document.getElementById('panel-gen');panel.innerHTML='';
+  const hdr=makeRoundHdr(`Round ${S.currentRound} — Generation`,'running');
+  panel.appendChild(hdr);
+  switchTab('gen');setStatus(`Round ${S.currentRound} — ${allGenAgents.length} agents in parallel...`);
+  const cards={},bodyEls={};
+  allGenAgents.forEach(agent=>{
+    const card=makeResultCard(agent.name,agent.color,'running');
+    panel.appendChild(card);cards[agent.id]=card;
+    bodyEls[agent.id]=card.querySelector('.rcard-body');
+    bodyEls[agent.id].innerHTML='<span class="cursor"></span>';
+  });
+  try{
+    // All agents share the same cached brief block — first call writes, rest hit
+    const promises=allGenAgents.map(agent=>
+      apiStream({
+        name:agent.name.slice(0,22),
+        systemBlocks:agentSystemBlocks(agent.mandate),
+        messages:[{role:'user',content:DEPTH_DIRS[S.depth]}],
+        signal:new AbortController().signal,
+        onChunk:chunk=>{
+          S.currentGen[agent.id]=(S.currentGen[agent.id]||'')+chunk;
+          bodyEls[agent.id].innerHTML=S.currentGen[agent.id]+'<span class="cursor"></span>';
+        }
+      }).then(result=>{
+        S.currentGen[agent.id]=result;
+        bodyEls[agent.id].innerHTML=result;
+        const badge=cards[agent.id].querySelector('.badge');
+        if(badge){badge.className='badge b-done';badge.textContent='done';}
+        const last=costS.calls[0];
+        if(last){
+          const h=cards[agent.id].querySelector('.rcard-hdr');
+          if(last.hit){const s=document.createElement('span');s.className='rcard-cache';s.textContent='⚡';h.appendChild(s);}
+          const s=document.createElement('span');s.className='rcard-cost';s.textContent='$'+last.cost.toFixed(4);h.appendChild(s);
+        }
+      })
+    );
+    await Promise.all(promises);
+    updateRoundHdr(hdr,'done');tc('gen',allGenAgents.length);
+    setStatus('Generation complete. Compressing outputs for synthesis...');
+    await runSynthesis(false);
+  }catch(e){if(e.name!=='AbortError'){setStatus('Error: '+e.message);updateRoundHdr(hdr,'error');}}
+  S.running=false;document.getElementById('run-btn').disabled=false;
+}
+
+// ══════════════════════════════════════════════════════════
+// DEBATE ROUND — multiple pairings per agent, batched calls
+// ══════════════════════════════════════════════════════════
+async function runDebate(){
+  if(S.running)return;
+  const activePairs=S.pairingProposals.filter(p=>p.enabled);
+  if(!activePairs.length){setStatus('No pairs enabled.');return;}
+  S.running=true;S.currentDebate={};
+  document.getElementById('run-btn').disabled=true;
+  const panel=document.getElementById('panel-deb');panel.innerHTML='';
+  const hdr=makeRoundHdr(`Round ${S.currentRound} — Debate`,'running');
+  panel.appendChild(hdr);switchTab('deb');
+
+  // Group pairings by the "responding" agent (id1) to batch multiple partners per agent
+  // Each agent gets one call listing all their debate partners — saves API calls proportionally
+  const agentPartners={}; // id1 -> [{id2, type, reason}]
+  activePairs.forEach(p=>{
+    if(!agentPartners[p.id1])agentPartners[p.id1]=[];
+    agentPartners[p.id1].push({id:p.id2,type:p.type,reason:p.reason});
+    // Each pair is one-directional from id1's perspective; id2 also gets a call if they have their own pairings
+  });
+
+  setStatus(`Debate — ${Object.keys(agentPartners).length} agent calls (${activePairs.length} pairs, batched)...`);
+  const words=DEPTH_WORDS[S.depth];
+
+  // Create UI cards per pair (for display), but calls are per responding agent
+  const pairBodyEls={};
+  activePairs.forEach(pair=>{
+    const key=pair.id1+'_'+pair.id2;
+    const a1=agents.find(a=>a.id===pair.id1),a2=agents.find(a=>a.id===pair.id2);
+    const card=makeDebateCard(a1,a2,pair.type);panel.appendChild(card);
+    pairBodyEls[key]=card.querySelector('.rcard-body');
+    pairBodyEls[key].innerHTML='<span class="cursor"></span>';
+  });
+
+  try{
+    const promises=Object.entries(agentPartners).map(([id1,partners])=>{
+      const a1=agents.find(a=>a.id===id1);
+      if(!a1)return Promise.resolve();
+      const isBatched=partners.length>1;
+      // Build user message: if multiple partners, list all; each gets a labeled response
+      let userMsg;
+      if(isBatched){
+        userMsg=`You have ${partners.length} debate partners this round. For each, write a focused response of approximately ${words} words, labelled exactly as shown.\n\n`;
+        partners.forEach((p,i)=>{
+          const a2=agents.find(a=>a.id===p.id);
+          const out2=S.currentGen[p.id]||'(no output)';
+          userMsg+=`PARTNER ${i+1} — ${a2?.name||p.id} [${p.type}]:\n---\n${out2}\n---\n\n`;
+        });
+        userMsg+=partners.map((p,i)=>{
+          const a2=agents.find(a=>a.id===p.id);
+          return `RESPONSE TO ${a2?.name||p.id}: [your ${words}-word response here]`;
+        }).join('\n\n');
+        userMsg+='\n\nChallenge assumptions, identify incompatible predictions, or show how combining frameworks yields something neither could produce alone. Be direct and technically specific.';
+      } else {
+        const p=partners[0];
+        const a2=agents.find(a=>a.id===p.id);
+        const out2=S.currentGen[p.id]||'(no output)';
+        userMsg=`You have read the output of ${a2?.name||p.id} (below). Write a focused debate response (~${words} words): challenge assumptions, identify incompatible predictions, or show how combining both frameworks yields something neither could produce alone.\n\n${a2?.name||p.id} wrote:\n---\n${out2}\n---\n\nBe direct, technically specific, and honest about where your own framework has limits.`;
+      }
+
+      let streaming='';
+      return apiStream({
+        name:`${a1.name.slice(0,12)} (${partners.length}↔)`,
+        systemBlocks:agentSystemBlocks(a1.mandate),
+        messages:[{role:'user',content:userMsg}],
+        signal:new AbortController().signal,
+        onChunk:chunk=>{
+          streaming+=chunk;
+          // Update all relevant pair cards as text streams in
+          partners.forEach(p=>{
+            const key=id1+'_'+p.id;
+            if(pairBodyEls[key])pairBodyEls[key].innerHTML=streaming+'<span class="cursor"></span>';
+          });
+        }
+      }).then(result=>{
+        // Parse batched response into per-pair chunks
+        if(isBatched){
+          partners.forEach(p=>{
+            const a2=agents.find(a=>a.id===p.id);
+            const label=`RESPONSE TO ${a2?.name||p.id}`;
+            const regex=new RegExp(label+'\\s*:\\s*([\\s\\S]*?)(?=RESPONSE TO |$)','i');
+            const match=result.match(regex);
+            const chunk=match?match[1].trim():result;
+            S.currentDebate[id1+'_'+p.id]=chunk;
+            if(pairBodyEls[id1+'_'+p.id])pairBodyEls[id1+'_'+p.id].innerHTML=chunk;
+          });
+        } else {
+          const key=id1+'_'+partners[0].id;
+          S.currentDebate[key]=result;
+          if(pairBodyEls[key])pairBodyEls[key].innerHTML=result;
+        }
+      });
+    });
+    await Promise.all(promises);
+    updateRoundHdr(hdr,'done');tc('deb',activePairs.length);
+    setStatus('Debate complete. Running synthesis...');
+    await runSynthesis(true);
+  }catch(e){if(e.name!=='AbortError')setStatus('Debate error: '+e.message);}
+  S.running=false;document.getElementById('run-btn').disabled=false;
+}
+
+// ══════════════════════════════════════════════════════════
+// SYNTHESIS — two-stage compression for post-debate runs
+// ══════════════════════════════════════════════════════════
+async function runSynthesis(includeDebate){
+  const panel=document.getElementById('panel-syn');panel.innerHTML='';
+  const hdr=makeRoundHdr('Synthesis','running');panel.appendChild(hdr);switchTab('syn');
+
+  let allOutputs='';
+
+  if(includeDebate){
+    // Two-stage: summarise generation outputs first (cheap), then synthesise with full debate outputs
+    // This keeps synthesis input size bounded regardless of round count
+    setStatus('Compressing generation outputs for synthesis...');
+    const genSummaries=await compressGenerationOutputs();
+    genSummaries.forEach(({name,summary})=>{allOutputs+=`\n\n=== ${name.toUpperCase()} (generation summary) ===\n${summary}`;});
+    Object.entries(S.currentDebate).forEach(([key,text])=>{
+      const[id1,id2]=key.split('_');
+      const n1=agents.find(a=>a.id===id1)?.name||id1;
+      const n2=agents.find(a=>a.id===id2)?.name||id2;
+      allOutputs+=`\n\n=== DEBATE: ${n1.toUpperCase()} → ${n2.toUpperCase()} ===\n${text}`;
+    });
+  } else {
+    // Post-generation: use full outputs — first synthesis of the round
+    Object.entries(S.currentGen).forEach(([id,text])=>{
+      const agent=agents.find(a=>a.id===id);
+      allOutputs+=`\n\n=== ${agent?agent.name.toUpperCase():id} ===\n${text}`;
+    });
+  }
+
+  const synthPrompt=`You have received outputs from a multi-agent theoretical research swarm. All outputs:\n${allOutputs}
+
+Write a rigorous synthesis (~400 words) with these exact sections:
+
+CONVERGENCES: 2-3 mechanisms multiple agents independently converge on.
+
+TENSIONS: 2-3 productive tensions. State incompatible claims precisely.
+
+MOST TRACTABLE FIRST STEP: The single most tractable step given the available data.
+
+BLIND SPOTS: 1-2 important phenomena no agent adequately addressed.
+
+RESEARCH DIRECTIONS (for tagging): List 4-6 specific directions as short titles:
+[DEEP+TRACTABLE] Title
+[DEEP+BLOCKED] Title
+[SHALLOW+TRACTABLE] Title
+[SHALLOW+BLOCKED] Title
+
+CONTRADICTIONS (for tracking):
+AGENT1 vs AGENT2: [claim 1] | [claim 2] | Resolution needed: [what would resolve it]`;
+
+  S.currentSynthesis='';
+  const sc=document.createElement('div');sc.className='synth-card';
+  sc.innerHTML=`<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-run">running</span></div><div class="rcard-body" id="syn-body"><span class="cursor"></span></div>`;
+  panel.appendChild(sc);
+  setStatus('Running synthesis...');
+
+  try{
+    const result=await apiStream({
+      name:'synthesis',
+      systemBlocks:briefOnlyBlock(),
+      messages:[{role:'user',content:synthPrompt}],
+      signal:new AbortController().signal,
+      onChunk:chunk=>{
+        S.currentSynthesis+=chunk;
+        const el=document.getElementById('syn-body');
+        if(el)el.innerHTML=S.currentSynthesis+'<span class="cursor"></span>';
+      }
+    });
+    S.currentSynthesis=result;
+    const el=document.getElementById('syn-body');if(el)el.innerHTML=result;
+    sc.querySelector('.badge').className='badge b-done';sc.querySelector('.badge').textContent='done';
+    updateRoundHdr(hdr,'done');tc('syn',1);
+    setStatus('Synthesis complete. Running meta-agent...');
+    parseSynthesis(result);
+    await runMeta(result);
+    saveRound();
+    autoExportJson();
+    autoExportMd();
+  }catch(e){if(e.name!=='AbortError')setStatus('Synthesis error: '+e.message);}
+}
+
+// Compress generation outputs to ~80 words each in a single batched call
+// Optimisation: one API call with all outputs, returns structured summaries
+async function compressGenerationOutputs(){
+  const entries=Object.entries(S.currentGen);
+  if(!entries.length)return[];
+  const agentBlocks=entries.map(([id,text])=>{
+    const name=agents.find(a=>a.id===id)?.name||id;
+    return`AGENT: ${name}\n${text}`;
+  }).join('\n\n---\n\n');
+
+  const prompt=`Summarise each agent's output below in approximately 80 words each, preserving the key technical claims and proposed methods. Use the format:\nSUMMARY [agent name]: [summary text]\n\nOutputs:\n${agentBlocks}`;
+
+  let raw='';
+  await apiStream({
+    name:'gen-compress',
+    systemBlocks:briefOnlyBlock(),
+    messages:[{role:'user',content:prompt}],
+    signal:new AbortController().signal,
+    onChunk:c=>{raw+=c;}
+  });
+
+  // Parse summaries
+  return entries.map(([id])=>{
+    const name=agents.find(a=>a.id===id)?.name||id;
+    const regex=new RegExp(`SUMMARY ${name}:\\s*([\\s\\S]*?)(?=SUMMARY |$)`,'i');
+    const match=raw.match(regex);
+    return{name,summary:match?match[1].trim():S.currentGen[id].slice(0,400)+'...'};
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// META-AGENT
+// ══════════════════════════════════════════════════════════
+async function runMeta(synthesisText){
+  const active=agents.filter(a=>S.agentStatuses[a.id]!=='retired'&&S.currentGen[a.id]);
+  if(active.length<2)return;
+  const agentList=active.map(a=>`- ${a.name} (id: ${a.id}, status: ${S.agentStatuses[a.id]||'active'})`).join('\n');
+  const metaPrompt=`You are a meta-agent directing a research swarm. Synthesis:
+
+${synthesisText}
+
+Active agents:
+${agentList}
+
+Propose debate pairings. IMPORTANT: agents may have MULTIPLE pairings — assign as many as are genuinely productive. There is no one-partner limit.
+
+For each pair (exact format):
+PAIR: [id1] | [id2] | [type] | [one-sentence justification]
+Types: CONTRADICTION (incompatible claims), INTERSECTION (unexplored overlap), DISRUPTION (break premature consensus), BRIDGE (connect tractable to deep)
+
+For agent status changes (exact format):
+RETIRE: [id] | [reason]
+PROMOTE: [id] | [reason]
+GENONLY: [id] | [reason] — contributes to generation but excluded from debate pairings
+ACTIVATE: [id] | [reason] — restore a genonly or promoted agent to full active status
+
+Propose 4-8 pairs total. Be direct; only change status if genuinely warranted.`;
+
+  try{
+    const result=await apiStream({
+      name:'meta-agent',
+      systemString:'You are a research director making editorial decisions about theoretical perspectives. Be direct and opinionated.',
+      messages:[{role:'user',content:metaPrompt}],
+      signal:new AbortController().signal,
+      onChunk:()=>{}
+    });
+    parseMeta(result);
+    updateOverlapMatrix();
+    setStatus('Ready. Review pairings in Next Round tab, then run debate round.');
+  }catch(e){setStatus('Meta-agent error: '+e.message);}
+}
+
+function parseMeta(text){
+  const pairs=[];
+  for(const m of text.matchAll(/PAIR:\s*([^\|]+)\|\s*([^\|]+)\|\s*([^\|]+)\|\s*([^\n]+)/g)){
+    const id1=m[1].trim(),id2=m[2].trim();
+    if(agents.find(a=>a.id===id1)&&agents.find(a=>a.id===id2)&&id1!==id2)
+      pairs.push({id1,id2,type:m[3].trim().toUpperCase(),reason:m[4].trim(),enabled:true});
+  }
+  S.pairingProposals=pairs;
+  const recs=[];
+  const statusMap={RETIRE:'retired',PROMOTE:'promoted',GENONLY:'genonly',ACTIVATE:'active'};
+  for(const[kw,status]of Object.entries(statusMap)){
+    for(const m of text.matchAll(new RegExp(`${kw}:\\s*([^|]+)\\|\\s*([^\\n]+)`,'g'))){
+      const id=m[1].trim();
+      if(agents.find(a=>a.id===id))recs.push({id,action:kw.toLowerCase(),status,reason:m[2].trim(),accepted:false});
+    }
+  }
+  S.retirementProposals=recs;
+  renderPairingsPanel();
+  renderAgentList();
+}
+
+// ══════════════════════════════════════════════════════════
+// ROSTER AGENT
+// ══════════════════════════════════════════════════════════
+function openRosterModal(){document.getElementById('roster-modal').classList.remove('hidden');}
+function closeRosterModal(){document.getElementById('roster-modal').classList.add('hidden');}
+
+async function runRosterAgent(){
+  const btn=document.getElementById('roster-run-btn');
+  btn.disabled=true;btn.textContent='running roster agent...';
+  const results=document.getElementById('roster-results');
+  results.innerHTML='<div style="font-size:11px;color:var(--text3);padding:10px 0;">Analysing brief and agent roster...</div>';
+  const mandateSummaries=agents.map(a=>`NAME: ${a.name}\nID: ${a.id}\nSTATUS: ${S.agentStatuses[a.id]||'active'}\nMANDATE (first 200 chars): ${a.mandate.slice(0,200)}...`).join('\n\n');
+  const synthHistory=S.rounds.slice(-2).map(r=>`Round ${r.round} synthesis excerpt:\n${r.synthesis?r.synthesis.slice(0,400):'(none)'}`).join('\n\n');
+  const prompt=`You are a roster agent for a multi-agent research swarm. Analyse the current brief, agent mandates, and recent synthesis history. Provide structured recommendations.
+
+BRIEF (combined):
+${buildCachedBlock().slice(0,1500)}...
+
+CURRENT AGENTS:
+${mandateSummaries}
+
+RECENT SYNTHESIS HISTORY:
+${synthHistory||'No rounds completed yet.'}
+
+Provide recommendations in these exact formats:
+
+NEW AGENT: [name] | [color hex from: #7ac8c8 #c87ac8 #c8a07a #7a9fc8 #a07ac8 #7ac87a #c8c87a #c87a7a #7ac8a0 #c8b97a]
+MANDATE: [full mandate text, ~120 words]
+REASON: [why this agent would add value]
+---
+(repeat for each suggested new agent, maximum 3)
+
+STATUS CHANGE: [id] | [new_status: active|genonly|retired|promoted] | [reason]
+(one per line, only if warranted)
+
+MANDATE UPDATE: [id] | [issue] | [suggested addition or correction in ~50 words]
+(one per line, only if drift detected)
+
+OVERLAP NOTES:
+For each pair of existing agents with HIGH predicted debate productivity, output:
+HIGH: [id1] | [id2] | [reason in one sentence]
+For pairs with LOW predicted productivity:
+LOW: [id1] | [id2] | [reason in one sentence]`;
+
+  try{
+    let raw='';
+    await apiStream({
+      name:'roster-agent',
+      systemBlocks:briefOnlyBlock(),
+      messages:[{role:'user',content:prompt}],
+      signal:new AbortController().signal,
+      onChunk:c=>{raw+=c;}
+    });
+    renderRosterResults(raw);
+  }catch(e){results.innerHTML=`<div style="color:var(--danger);font-size:12px;padding:10px 0;">Error: ${e.message}</div>`;}
+  btn.disabled=false;btn.textContent='run roster agent ✦';
+}
+
+function renderRosterResults(raw){
+  const results=document.getElementById('roster-results');
+  results.innerHTML='';
+
+  // Parse new agent suggestions
+  const newAgentMatches=[...raw.matchAll(/NEW AGENT:\s*([^\|]+)\|([^\n]+)\nMANDATE:\s*([^\n]+(?:\n(?!REASON:|NEW AGENT:|STATUS|MANDATE|OVERLAP|HIGH:|LOW:|---)[^\n]*)*)\nREASON:\s*([^\n]+)/g)];
+  if(newAgentMatches.length){
+    const lbl=document.createElement('div');lbl.className='sec-label';lbl.textContent='Suggested new agents';results.appendChild(lbl);
+    newAgentMatches.forEach(m=>{
+      const name=m[1].trim(),colorHint=m[2].trim(),mandate=m[3].trim(),reason=m[4].trim();
+      const usedColors=new Set(agents.map(a=>a.color));
+      const color=COLOURS.find(c=>colorHint.includes(c.slice(1)))||COLOURS.find(c=>!usedColors.has(c))||COLOURS[0];
+      const div=document.createElement('div');div.className='roster-suggestion';
+      div.innerHTML=`<div class="rs-hdr">
+        <span class="agent-dot" style="background:${color}"></span>
+        <span class="rs-name">${name}</span>
+      </div>
+      <div class="rs-mandate-preview" style="font-size:11px;color:var(--text3);line-height:1.5;margin:4px 0;">${mandate.slice(0,180)}...</div>
+      <div style="font-size:11px;color:var(--accent3);margin-bottom:6px;font-style:italic;">${reason}</div>
+      <div class="rs-actions">
+        <button class="mbtn mbtn-p" style="font-size:10px;padding:4px 10px;" onclick="addRosterAgent('${encodeURIComponent(name)}','${color}','${encodeURIComponent(mandate)}',this)">add agent</button>
+        <button class="mbtn mbtn-s" style="font-size:10px;padding:4px 10px;" onclick="addRosterAgentEdit('${encodeURIComponent(name)}','${color}','${encodeURIComponent(mandate)}')">add & edit</button>
+      </div>`;
+      results.appendChild(div);
+    });
+  }
+
+  // Parse status changes
+  const statusLines=[...raw.matchAll(/STATUS CHANGE:\s*([^\|]+)\|\s*([^\|]+)\|\s*([^\n]+)/g)];
+  if(statusLines.length){
+    const lbl=document.createElement('div');lbl.className='sec-label';lbl.style.marginTop='10px';lbl.textContent='Status change recommendations';results.appendChild(lbl);
+    statusLines.forEach(m=>{
+      const id=m[1].trim(),newStatus=m[2].trim(),reason=m[3].trim();
+      const agent=agents.find(a=>a.id===id);if(!agent)return;
+      const div=document.createElement('div');div.className='rp-item';div.style.marginBottom='4px';
+      div.innerHTML=`<span class="rp-action" style="background:var(--bg4);color:var(--text2)">${newStatus}</span>
+        <span class="rp-text"><strong>${agent.name}</strong> — ${reason}</span>
+        <button class="rp-btn" onclick="applyStatusChange('${id}','${newStatus}',this)">apply</button>`;
+      results.appendChild(div);
+    });
+  }
+
+  // Parse mandate updates
+  const mandateUpdates=[...raw.matchAll(/MANDATE UPDATE:\s*([^\|]+)\|\s*([^\|]+)\|\s*([^\n]+)/g)];
+  if(mandateUpdates.length){
+    const lbl=document.createElement('div');lbl.className='sec-label';lbl.style.marginTop='10px';lbl.textContent='Mandate drift corrections';results.appendChild(lbl);
+    mandateUpdates.forEach(m=>{
+      const id=m[1].trim(),issue=m[2].trim(),suggestion=m[3].trim();
+      const agent=agents.find(a=>a.id===id);if(!agent)return;
+      const div=document.createElement('div');div.style.cssText='background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 10px;margin-bottom:4px;';
+      div.innerHTML=`<div style="font-size:11px;color:var(--text2);margin-bottom:3px;"><strong>${agent.name}</strong>: ${issue}</div>
+        <div style="font-size:11px;color:var(--text3);font-style:italic;margin-bottom:5px;">${suggestion}</div>
+        <button class="sm-btn" onclick="openAgentModal('${id}')">open mandate editor</button>`;
+      results.appendChild(div);
+    });
+  }
+
+  // Parse overlap notes and update matrix
+  const highPairs=[...raw.matchAll(/HIGH:\s*([^\|]+)\|\s*([^\|]+)\|\s*([^\n]+)/g)];
+  const lowPairs=[...raw.matchAll(/LOW:\s*([^\|]+)\|\s*([^\|]+)\|\s*([^\n]+)/g)];
+  highPairs.forEach(m=>{const k=m[1].trim()+'_'+m[2].trim();S.overlapScores[k]={score:.8,reason:m[3].trim(),source:'roster'};});
+  lowPairs.forEach(m=>{const k=m[1].trim()+'_'+m[2].trim();S.overlapScores[k]={score:.2,reason:m[3].trim(),source:'roster'};});
+  if(highPairs.length||lowPairs.length)renderOverlapMatrix();
+
+  if(!results.children.length){
+    results.innerHTML='<div style="font-size:12px;color:var(--text3);padding:10px 0;">No recommendations generated. The roster may already be well-configured.</div>';
+  }
+}
+
+function addRosterAgent(nameEnc,color,mandateEnc,btn){
+  const name=decodeURIComponent(nameEnc),mandate=decodeURIComponent(mandateEnc);
+  const id='agent_'+Date.now();
+  agents.push({id,name,color,mandate});
+  S.agentStatuses[id]='active';S.selectedAgents.add(id);
+  renderAgentList();
+  btn.textContent='added ✓';btn.disabled=true;
+}
+
+function addRosterAgentEdit(nameEnc,color,mandateEnc){
+  const id='agent_'+Date.now();
+  const name=decodeURIComponent(nameEnc),mandate=decodeURIComponent(mandateEnc);
+  agents.push({id,name,color,mandate});
+  S.agentStatuses[id]='active';S.selectedAgents.add(id);
+  renderAgentList();
+  openAgentModal(id);
+}
+
+function applyStatusChange(id,newStatus,btn){
+  const statusMap={active:'active',genonly:'genonly',retired:'retired',promoted:'promoted'};
+  S.agentStatuses[id]=statusMap[newStatus]||'active';
+  renderAgentList();btn.textContent='applied ✓';btn.disabled=true;
+}
+
+// ══════════════════════════════════════════════════════════
+// PAIRINGS PANEL
+// ══════════════════════════════════════════════════════════
+function renderPairingsPanel(){
+  const panel=document.getElementById('panel-pair');panel.innerHTML='';
+  if(!S.pairingProposals.length){panel.innerHTML='<div class="empty-state"><span class="big">No proposals yet</span>Run generation and synthesis first.</div>';return;}
+  panel.appendChild(makeSectionLabel(`Proposed debate pairings — round ${S.currentRound+1}`));
+  panel.appendChild(makeNotice('Agents may have multiple pairings — shown as N↔ in the sidebar. Toggle pairs on/off, then launch the debate round.'));
+  const wrap=document.createElement('div');wrap.className='pair-panel';
+  const ph=document.createElement('div');ph.className='pair-panel-hdr';
+  ph.innerHTML=`<span style="font-family:var(--serif);font-style:italic;font-size:14px;color:var(--text);flex:1">Debate pair proposals</span><span class="badge b-deb">${S.pairingProposals.filter(p=>p.enabled).length} active</span>`;
+  wrap.appendChild(ph);
+  const list=document.createElement('div');list.className='pair-list';
+  S.pairingProposals.forEach((pair,i)=>{
+    const a1=agents.find(a=>a.id===pair.id1),a2=agents.find(a=>a.id===pair.id2);
+    const typeClass={'CONTRADICTION':'pt-c','INTERSECTION':'pt-i','DISRUPTION':'pt-d','BRIDGE':'pt-b'}[pair.type]||'pt-b';
+    const item=document.createElement('div');item.className=`pair-item ${pair.enabled?'on':'off'}`;
+    item.innerHTML=`<div class="ptoggle ${pair.enabled?'on':''}" onclick="togglePair(${i})">${pair.enabled?'✓':''}</div>
+      <div style="flex:1">
+        <div class="pair-agents">
+          <span class="pat" style="background:${a1?.color}22;color:${a1?.color}">${a1?.name||pair.id1}</span>
+          <span style="color:var(--text3);font-size:11px">→</span>
+          <span class="pat" style="background:${a2?.color}22;color:${a2?.color}">${a2?.name||pair.id2}</span>
+          <span class="ptb ${typeClass}">${pair.type}</span>
+        </div>
+        <div class="pair-reason">${pair.reason}</div>
+      </div>`;
+    list.appendChild(item);
+  });
+  wrap.appendChild(list);
+  if(S.retirementProposals.length){
+    const rp=document.createElement('div');rp.className='rp-sec';
+    rp.innerHTML='<div class="rp-lbl">Agent status recommendations</div>';
+    S.retirementProposals.forEach((rec,i)=>{
+      const agent=agents.find(a=>a.id===rec.id);
+      const actionColors={retire:'rpa-retire',promote:'rpa-promote',genonly:'rpa-genonly',activate:'asp-active'};
+      const item=document.createElement('div');item.className='rp-item';item.style.marginBottom='4px';
+      item.innerHTML=`<span class="rp-action ${actionColors[rec.action]||'rpa-retire'}">${rec.action}</span>
+        <span class="rp-text"><strong>${agent?.name||rec.id}</strong> — ${rec.reason}</span>
+        <button class="rp-btn ${rec.accepted?'accepted':''}" onclick="acceptRec(${i})">${rec.accepted?'accepted':'accept'}</button>`;
+      rp.appendChild(item);
+    });
+    wrap.appendChild(rp);
+  }
+  panel.appendChild(wrap);
+  const btn=document.createElement('button');btn.className='launch-btn';btn.textContent='launch debate round →';btn.onclick=runDebate;
+  panel.appendChild(btn);
+  tc('pair',S.pairingProposals.filter(p=>p.enabled).length);
+}
+
+function togglePair(i){S.pairingProposals[i].enabled=!S.pairingProposals[i].enabled;renderPairingsPanel();renderAgentList();}
+function acceptRec(i){
+  const rec=S.retirementProposals[i];rec.accepted=!rec.accepted;
+  if(rec.accepted)S.agentStatuses[rec.id]=rec.status||'retired';
+  else S.agentStatuses[rec.id]='active';
+  renderAgentList();renderPairingsPanel();
+}
+
+// ══════════════════════════════════════════════════════════
+// PARSE SYNTHESIS
+// ══════════════════════════════════════════════════════════
+function parseSynthesis(text){
+  // Research map — accumulate, deduplicate
+  let mapCount=0;
+  for(const m of text.matchAll(/\[(?:DEEP|SHALLOW)[+](?:TRACTABLE|BLOCKED)\][^\n]*/g)){
+    const line=m[0];
+    const title=line.replace(/\[.*?\]/g,'').replace(/^[-–•\d.]+\s*/,'').trim();
+    const cat=line.match(/\[(.*?)\]/)?.[1]||'';
+    if(title&&!S.researchMap.find(r=>r.title===title)){
+      S.researchMap.push({title,category:cat,round:S.currentRound,tag:null});mapCount++;
+    }
+  }
+  rebuildMap();tc('map',S.researchMap.length);
+
+  // Contradictions — accumulate
+  for(const m of (text.match(/CONTRADICTIONS[\s\S]*$/i)?.[0]||text).matchAll(/([A-Z][^:]+) vs ([^:]+):\s*([^|]+)\|\s*([^|]+)\|\s*Resolution needed:\s*([^\n]+)/g)){
+    const e={a1:m[1].trim(),a2:m[2].trim(),claim1:m[3].trim(),claim2:m[4].trim(),resolution:m[5].trim(),round:S.currentRound};
+    if(!S.contradictions.find(c=>c.claim1===e.claim1))S.contradictions.push(e);
+  }
+  rebuildContradictions();tc('contra',S.contradictions.length||'!');
+
+  // Matrix
+  const dt=[],db=[],st=[],sb=[];
+  for(const m of text.matchAll(/\[(DEEP|SHALLOW)\+(TRACTABLE|BLOCKED)\]\s*([^\n]+)/g)){
+    const t=m[3].replace(/^[-–•\d.]+\s*/,'').trim();
+    if(m[1]==='DEEP'&&m[2]==='TRACTABLE')dt.push(t);
+    else if(m[1]==='DEEP'&&m[2]==='BLOCKED')db.push(t);
+    else if(m[1]==='SHALLOW'&&m[2]==='TRACTABLE')st.push(t);
+    else sb.push(t);
+  }
+  S.matrix={dt,db,st,sb};rebuildMatrix();
+}
+
+function rebuildMap(){
+  const p=document.getElementById('panel-map');p.innerHTML='';
+  if(!S.researchMap.length){p.innerHTML='<div class="empty-state"><span class="big">Research map</span>Directions appear here after synthesis.</div>';return;}
+  p.appendChild(makeSectionLabel('Research directions — tag for tracking'));
+  S.researchMap.forEach((item,i)=>{
+    const cc=item.category.includes('DEEP')&&item.category.includes('TRACTABLE')?'var(--success)':item.category.includes('DEEP')?'var(--accent3)':item.category.includes('TRACTABLE')?'var(--accent)':'var(--text3)';
+    const div=document.createElement('div');div.className='map-entry';
+    div.innerHTML=`<div class="me-hdr"><span class="me-title">${item.title}</span><span class="me-meta" style="color:${cc}">${item.category}·R${item.round}</span></div>
+      <div class="tag-row">${[['pursue','tb-pursue'],['revisit','tb-revisit'],['needs-data','tb-needs'],['blocked','tb-blocked']].map(([t,cls])=>
+        `<button class="tag-btn${item.tag===t?' '+cls:''}" onclick="setTag(${i},'${t}','${cls}',this)">${t.replace('-',' ')}</button>`
+      ).join('')}</div>`;
+    p.appendChild(div);
+  });
+}
+function setTag(i,tag,cls,btn){
+  S.researchMap[i].tag=S.researchMap[i].tag===tag?null:tag;
+  const row=btn.closest('.tag-row');
+  row.querySelectorAll('.tag-btn').forEach(b=>b.className='tag-btn');
+  if(S.researchMap[i].tag)btn.className='tag-btn '+cls;
+}
+
+function rebuildContradictions(){
+  const p=document.getElementById('panel-contra');p.innerHTML='';
+  if(!S.contradictions.length){p.innerHTML='<div class="empty-state"><span class="big">Contradiction tracker</span>Incompatible claims appear here after synthesis.</div>';return;}
+  p.appendChild(makeSectionLabel('Incompatible claims — accumulates across rounds'));
+  S.contradictions.forEach(c=>{
+    const div=document.createElement('div');div.className='contra-item';
+    div.innerHTML=`<div class="contra-agents"><span style="font-size:11px;color:var(--text2)">${c.a1}</span><span class="contra-vs">vs</span><span style="font-size:11px;color:var(--text2)">${c.a2}</span><span style="font-size:9px;color:var(--text3);margin-left:3px">R${c.round}</span></div>
+      <div class="contra-text">${c.claim1}${c.claim2?' — vs — '+c.claim2:''}</div>
+      ${c.resolution?`<div class="contra-res">Resolution: ${c.resolution}</div>`:''}`;
+    p.appendChild(div);
+  });
+}
+
+function rebuildMatrix(){
+  const p=document.getElementById('panel-matrix');p.innerHTML='';
+  p.appendChild(makeSectionLabel('Depth / tractability matrix (latest synthesis)'));
+  p.appendChild(makeMatrix(S.matrix.dt||[],S.matrix.db||[],S.matrix.st||[],S.matrix.sb||[]));
+}
+
+// ══════════════════════════════════════════════════════════
+// OVERLAP MATRIX
+// ══════════════════════════════════════════════════════════
+function updateOverlapMatrix(){
+  // Static overlap: estimate from mandate text similarity (Jaccard on word sets)
+  const activeAgents=agents.filter(a=>S.agentStatuses[a.id]!=='retired');
+  for(let i=0;i<activeAgents.length;i++){
+    for(let j=i+1;j<activeAgents.length;j++){
+      const a=activeAgents[i],b=activeAgents[j];
+      const key=a.id+'_'+b.id;
+      if(!S.overlapScores[key]||S.overlapScores[key].source==='static'){
+        const wa=new Set(a.mandate.toLowerCase().split(/\W+/).filter(w=>w.length>5));
+        const wb=new Set(b.mandate.toLowerCase().split(/\W+/).filter(w=>w.length>5));
+        const inter=[...wa].filter(w=>wb.has(w)).length;
+        const union=new Set([...wa,...wb]).size;
+        S.overlapScores[key]={score:union>0?inter/union:0,source:'static'};
+      }
+    }
+  }
+  renderOverlapMatrix();
+}
+
+function renderOverlapMatrix(){
+  const p=document.getElementById('panel-overlap');p.innerHTML='';
+  const active=agents.filter(a=>S.agentStatuses[a.id]!=='retired');
+  if(active.length<2){p.innerHTML='<div class="empty-state"><span class="big">Overlap matrix</span>Needs at least 2 active agents.</div>';return;}
+  p.appendChild(makeSectionLabel('Pairwise overlap — colour = predicted debate productivity'));
+  const n=active.length;
+  const grid=document.createElement('div');grid.className='overlap-grid';
+  grid.style.gridTemplateColumns=`80px repeat(${n},1fr)`;
+  // Header row
+  const corner=document.createElement('div');corner.className='og-cell mcell mhdr';grid.appendChild(corner);
+  active.forEach(a=>{const d=document.createElement('div');d.className='og-hdr';d.textContent=a.name;d.title=a.name;grid.appendChild(d);});
+  // Data rows
+  active.forEach((a,i)=>{
+    const rl=document.createElement('div');rl.className='og-row-lbl';rl.textContent=a.name;rl.title=a.name;grid.appendChild(rl);
+    active.forEach((b,j)=>{
+      const cell=document.createElement('div');cell.className='og-cell';
+      if(i===j){const d=document.createElement('div');d.className='og-score';d.style.cssText='background:var(--bg4);';cell.appendChild(d);}
+      else{
+        const key=i<j?a.id+'_'+b.id:b.id+'_'+a.id;
+        const sc=S.overlapScores[key];
+        const score=sc?sc.score:0;
+        const r=Math.round(score*255),g=Math.round((1-score)*200);
+        const bg=`rgba(${r},${Math.max(100,200-r)},${g},0.35)`;
+        const d=document.createElement('div');d.className='og-score';
+        d.style.background=bg;d.textContent=Math.round(score*100)+'%';
+        d.title=(sc?.reason||'')+` (${sc?.source||'static'})`;
+        cell.appendChild(d);
+      }
+      grid.appendChild(cell);
+    });
+  });
+  p.appendChild(grid);
+  const note=document.createElement('div');note.style.cssText='font-size:10px;color:var(--text3);margin-top:6px;';
+  note.textContent='Green = high overlap (productive debate). Red = low overlap. Source: static mandate analysis; updated by roster agent.';
+  p.appendChild(note);
+}
+
+// ══════════════════════════════════════════════════════════
+// SESSION LOG + EXPORT
+// ══════════════════════════════════════════════════════════
+function saveRound(){
+  S.rounds.push({
+    round:S.currentRound,ts:new Date().toISOString(),depth:S.depth,
+    generationOutputs:{...S.currentGen},debateOutputs:{...S.currentDebate},
+    synthesis:S.currentSynthesis,pairingProposals:[...S.pairingProposals],
+    retirementProposals:[...S.retirementProposals]
+  });
+  renderLog();tc('log',S.rounds.length);
+}
+
+function renderLog(){
+  const p=document.getElementById('panel-log');p.innerHTML='';
+  if(!S.rounds.length){p.innerHTML='<div class="empty-state"><span class="big">Session log</span>Every round accumulates here and is auto-exported as JSON.</div>';return;}
+  p.appendChild(makeSectionLabel(`${S.rounds.length} round${S.rounds.length>1?'s':''} — auto-exported after each synthesis`));
+  [...S.rounds].reverse().forEach(r=>{
+    const div=document.createElement('div');div.className='log-entry';
+    const genNames=Object.keys(r.generationOutputs).map(id=>agents.find(a=>a.id===id)?.name||id);
+    const debCount=Object.keys(r.debateOutputs).length;
+    div.innerHTML=`<div class="log-entry-hdr"><span class="badge b-done">done</span><span style="font-size:12px;color:var(--text2);flex:1;margin-left:6px;">Round ${r.round} · ${r.depth} · ${new Date(r.ts).toLocaleTimeString()}</span></div>
+      <div class="log-entry-body">${genNames.length} agents · ${debCount} debate outputs\n\n${r.synthesis?r.synthesis.slice(0,400)+'…':'(no synthesis)'}</div>`;
+    p.appendChild(div);
+  });
+}
+
+function autoExportJson(){
+  try{
+    const data=buildExportData();
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`swarm-${Date.now()}.json`;a.click();
+    URL.revokeObjectURL(url);
+  }catch(e){console.warn('Auto JSON export failed',e);}
+}
+
+function autoExportMd(){
+  try{
+    const blob=new Blob([buildMd()],{type:'text/markdown'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`swarm-${Date.now()}.md`;a.click();
+    URL.revokeObjectURL(url);
+  }catch(e){console.warn('Auto MD export failed',e);}
+}
+
+function buildExportData(){
+  return{exportTime:new Date().toISOString(),brief,
+    agentMandates:Object.fromEntries(agents.map(a=>[a.id,{name:a.name,color:a.color,mandate:a.mandate,status:S.agentStatuses[a.id]||'active'}])),
+    sessionCost:{total:costS.total,saved:costS.saved,inputTok:costS.inp,outputTok:costS.out,cacheReads:costS.cr,cacheWrites:costS.cw},
+    rounds:S.rounds,researchMap:S.researchMap,contradictions:S.contradictions,
+    matrix:S.matrix,overlapScores:S.overlapScores};
+}
+
+function buildMd(){
+  let out=`# ${brief.title}\n\n**${brief.subtitle}**\n\n`;
+  out+=`Export: ${new Date().toISOString()} | Cost: $${costS.total.toFixed(4)} | Cache savings: $${costS.saved.toFixed(4)}\n\n`;
+  out+=`## Brief\n\n### Problem Context\n${brief.sysCtx}\n\n### Research Context\n${brief.resCtx}\n\n### Available Data\n${brief.dataCtx}\n\n`;
+  out+=`## Research Map\n\n`;
+  S.researchMap.forEach(r=>out+=`- **[${r.category}]** ${r.title} *(R${r.round}, ${r.tag||'untagged'})*\n`);
+  out+=`\n## Contradictions\n\n`;
+  S.contradictions.forEach(c=>out+=`- **${c.a1} vs ${c.a2}** (R${c.round})\n  ${c.claim1} — vs — ${c.claim2}\n  *Resolution: ${c.resolution}*\n\n`);
+  S.rounds.forEach(r=>{
+    out+=`\n${'='.repeat(60)}\n## Round ${r.round} · ${r.depth}\n\n### Generation\n\n`;
+    Object.entries(r.generationOutputs).forEach(([id,text])=>{const n=agents.find(a=>a.id===id)?.name||id;out+=`#### ${n}\n${text}\n\n`;});
+    if(Object.keys(r.debateOutputs).length){
+      out+=`### Debate\n\n`;
+      Object.entries(r.debateOutputs).forEach(([key,text])=>{
+        const[id1,id2]=key.split('_');
+        const n1=agents.find(a=>a.id===id1)?.name||id1,n2=agents.find(a=>a.id===id2)?.name||id2;
+        out+=`#### ${n1} → ${n2}\n${text}\n\n`;
+      });
+    }
+    out+=`### Synthesis\n${r.synthesis}\n`;
+  });
+  return out;
+}
+
+function exportJson(){
+  try{
+    const blob=new Blob([JSON.stringify(buildExportData(),null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`swarm-${Date.now()}.json`;a.click();
+    URL.revokeObjectURL(url);
+  }catch(e){console.warn('Export failed',e);}
+}
+
+function exportMd(){
+  try{
+    const blob=new Blob([buildMd()],{type:'text/markdown'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`swarm-${Date.now()}.md`;a.click();
+    URL.revokeObjectURL(url);
+  }catch(e){console.warn('Export failed',e);}
+}
+
+function importSession(event){
+  const file=event.target.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      // Restore brief
+      if(data.brief){
+        brief={...brief,...data.brief};
+        document.getElementById('swarm-title').innerHTML=brief.title.replace('\n','<br>');
+        document.getElementById('swarm-subtitle').textContent=brief.subtitle;
+        document.title=brief.title;
+      }
+      // Restore agents from saved mandates
+      if(data.agentMandates){
+        Object.entries(data.agentMandates).forEach(([id,saved])=>{
+          const existing=agents.find(a=>a.id===id);
+          if(existing){
+            existing.name=saved.name;existing.color=saved.color;existing.mandate=saved.mandate;
+            if(saved.status)S.agentStatuses[id]=saved.status;
+          } else {
+            agents.push({id,name:saved.name,color:saved.color,mandate:saved.mandate});
+            S.agentStatuses[id]=saved.status||'active';
+            S.selectedAgents.add(id);
+          }
+        });
+      }
+      // Restore accumulated research intelligence
+      if(data.rounds)S.rounds=[...data.rounds];
+      if(data.researchMap)S.researchMap=[...data.researchMap];
+      if(data.contradictions)S.contradictions=[...data.contradictions];
+      if(data.matrix)S.matrix={...data.matrix};
+      if(data.overlapScores)S.overlapScores={...data.overlapScores};
+      // Restore round counter
+      if(data.rounds&&data.rounds.length)S.currentRound=Math.max(...data.rounds.map(r=>r.round));
+      // Rebuild all panels
+      renderAgentList();
+      renderLog();
+      rebuildMap();
+      rebuildContradictions();
+      rebuildMatrix();
+      renderOverlapMatrix();
+      tc('log',S.rounds.length);
+      tc('map',S.researchMap.length);
+      tc('contra',S.contradictions.length||'!');
+      setStatus(`Session imported: ${S.rounds.length} round${S.rounds.length!==1?'s':''} restored. API key required to continue.`);
+      switchTab('log');
+    }catch(err){
+      setStatus('Import failed: '+err.message);
+      console.error('Import error',err);
+    }
+  };
+  reader.readAsText(file);
+  // Reset file input so the same file can be re-imported
+  event.target.value='';
+}
+
+// ══════════════════════════════════════════════════════════
+// DOM HELPERS
+// ══════════════════════════════════════════════════════════
+function makeRoundHdr(title,status){
+  const div=document.createElement('div');div.className='round-hdr';
+  const sc={running:'rs-running',done:'rs-done',error:'rs-error'}[status]||'rs-running';
+  div.innerHTML=`<span class="round-lbl">round</span><span class="round-title">${title}</span><span class="round-status ${sc}" id="rh-s">${status}</span>`;
+  return div;
+}
+function updateRoundHdr(h,status){
+  const el=h.querySelector('#rh-s');if(!el)return;
+  el.className='round-status '+({running:'rs-running',done:'rs-done',error:'rs-error'}[status]||'rs-running');
+  el.textContent=status;
+}
+function makeResultCard(title,color,bs){
+  const div=document.createElement('div');div.className='rcard';
+  const bc={running:'b-run',done:'b-done',pending:'b-pend'}[bs]||'b-pend';
+  div.innerHTML=`<div class="rcard-hdr"><span class="agent-dot" style="background:${color}"></span><span class="rcard-title">${title}</span><span class="badge ${bc}">${bs}</span></div><div class="rcard-body"></div>`;
+  return div;
+}
+function makeDebateCard(a1,a2,type){
+  const div=document.createElement('div');div.className='rcard';
+  const tc2={CONTRADICTION:'pt-c',INTERSECTION:'pt-i',DISRUPTION:'pt-d',BRIDGE:'pt-b'}[type]||'pt-b';
+  div.innerHTML=`<div class="rcard-hdr"><span class="agent-dot" style="background:${a1?.color||'#888'}"></span><span class="rcard-title">${a1?.name||'?'} → ${a2?.name||'?'}</span><span class="ptb ${tc2}" style="margin-left:auto">${type}</span></div><div class="rcard-body"></div>`;
+  return div;
+}
+function makeMatrix(dt,db,st,sb){
+  const g=document.createElement('div');g.className='matrix-grid';
+  const c=(h,cls='mcell')=>{const d=document.createElement('div');d.className=cls;d.innerHTML=h;return d;};
+  const q=(items,color)=>{const d=document.createElement('div');d.className='mcell mquad';items.forEach(t=>{const i=document.createElement('div');i.className='mitem';i.style.borderLeftColor=color;i.textContent=t;d.appendChild(i);});if(!items.length){const e=document.createElement('div');e.style.cssText='font-size:10px;color:var(--text3);font-style:italic';e.textContent='none';d.appendChild(e);}return d;};
+  g.appendChild(c('','mcell mhdr'));g.appendChild(c('tractable','mcell mhdr'));g.appendChild(c('blocked','mcell mhdr'));
+  g.appendChild(c('deep','mcell maxs'));g.appendChild(q(dt,'var(--success)'));g.appendChild(q(db,'var(--accent3)'));
+  g.appendChild(c('shallow','mcell maxs'));g.appendChild(q(st,'var(--accent)'));g.appendChild(q(sb,'var(--text3)'));
+  return g;
+}
+function makeSectionLabel(text){const d=document.createElement('div');d.className='sec-label';d.textContent=text;return d;}
+function makeNotice(text){const d=document.createElement('div');d.className='notice';d.textContent=text;return d;}
+
+// ══════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════
+renderAgentList();
+renderCost();
+updateOverlapMatrix();
+</script>
+</body>
+</html>

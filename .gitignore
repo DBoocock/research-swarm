@@ -1,0 +1,13 @@
+# Auto-exported session files
+swarm-*.json
+swarm-*.md
+swarm-*.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
