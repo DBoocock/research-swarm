@@ -1,5 +1,48 @@
 # Changelog
 
+## v4.4.0
+
+### Multi-provider API support — Gemini 2.5 Flash (issue #6)
+
+The application now supports two API providers selectable from the sidebar. Google Gemini is the default, allowing zero-cost use within Google AI Studio's free-tier daily quota.
+
+#### Provider abstraction layer
+
+- **`PROVIDERS` registry**: declarative provider metadata (`gemini`, `anthropic`) used by both the UI and the JS logic
+- **`MODELS` constant restructured**: now two-dimensional — `MODELS[role][provider]` — resolving to the correct model string for each role/provider combination
+- **`modelFor(role)`**: replaces `resolveModel(role)`. Provider-aware resolver; the Sonnet/Opus synthesis toggle now only applies on the Anthropic path and is silently ignored on Gemini
+- **`AnthropicProvider`**: existing streaming logic extracted verbatim; prompt caching (`cache_control` blocks) fully preserved on this path
+- **`GeminiProvider`**: new implementation — converts Anthropic-style `messages` + `system` to Gemini `contents` + `system_instruction` format; separate SSE stream parser for Gemini's `candidates[0].content.parts[0].text` chunk shape; accumulates `usageMetadata` from final chunk; no caching (Gemini caching has different mechanics — not ported in this version)
+- **`apiStream(args)`**: now a thin dispatcher to the active provider. Signature unchanged — all callsites unaffected
+- **`callParallel(fns)`**: new helper wrapping agent parallelism. On Anthropic: `Promise.all` (exploits warm cache). On Gemini: sequential with 1,500 ms inter-call delay (respects free-tier 10 RPM limit for 2.5 Flash). Used in `runGen()` and `runDebate()`
+- **`PRICING`**: Gemini 2.5 Flash entry added (`$0.30/$2.50` per million in/out). Cost display shows "free tier" sublabel when Gemini is active
+
+#### State changes
+
+- `S.provider`: `'anthropic' | 'gemini'` — persisted in export JSON
+- `S.apiKeys`: `{anthropic: string, gemini: string}` — **never exported**; populated live from sidebar inputs
+
+#### Sidebar UI
+
+- Provider selector replaces the single Anthropic key field: radio buttons (Gemini default, Anthropic option)
+- Per-provider key fields shown/hidden on selection
+- Synthesis model (Sonnet/Opus) toggle greys out with "Anthropic only" label when Gemini is selected
+- Cost sublabel reads "this session (free tier)" on Gemini path
+
+#### Model strings
+
+- Gemini: `gemini-2.5-flash` (stable alias — no snapshot suffix, unlike Haiku)
+- Anthropic: unchanged
+
+#### Design principles preserved
+
+- Single file — no new dependencies
+- Prompt caching logic remains entirely within `AnthropicProvider`; Gemini path never touches it
+- Cheap-model-for-cheap-tasks: on Gemini, all roles use `gemini-2.5-flash` (no Lite/Flash distinction needed for this use case)
+- Adding a third provider: implement a provider object, add a column to `MODELS`, add `PRICING` entries, add a radio option — no changes elsewhere
+
+---
+
 ## v4.3.1
 
 ### Documentation and minor bug fixes

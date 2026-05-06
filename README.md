@@ -110,8 +110,8 @@ This cycle repeats. Research directions, contradictions, and matrix entries accu
 ### Requirements
 
 - A modern web browser (Chrome, Firefox, Safari, Edge)
-- An Anthropic API key with access to `claude-sonnet-4-6`
-- No server, build step, or internet connection beyond the Anthropic API
+- A free Google Gemini API key **or** an Anthropic API key — see below
+- No server, build step, or internet connection beyond the chosen API
 
 ### Installation
 
@@ -129,18 +129,30 @@ This cycle repeats. Research directions, contradictions, and matrix entries accu
    ```
    Or drag the file into your browser window.
 
-3. Enter your Anthropic API key in the sidebar (the key field at the top, below the swarm title).
+3. Select your API provider in the sidebar and enter the corresponding key:
+   - **Google Gemini** (default, free): get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+   - **Anthropic**: get a key at [console.anthropic.com](https://console.anthropic.com) (requires billing)
 
 That is all that is required. There is no npm install, no server to run, and no environment variables to configure.
 
 ### Getting an API key
 
+**Google Gemini (default — free)**
+
+1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and sign in with a Google account
+2. Create a new API key — no credit card or billing setup required
+3. Paste it into the **Gemini API key** field in the sidebar
+
+Gemini 2.5 Flash is available on the free tier with a daily request quota. On this path, agent calls run sequentially (rather than in parallel) to respect the free-tier rate limit of 10 requests per minute — sessions take a little longer but cost nothing. Google's free tier carries a data-use clause: inputs and outputs may be used to improve Google's products.
+
+**Anthropic (paid, parallel, with prompt caching)**
+
 1. Go to [console.anthropic.com](https://console.anthropic.com) and create an account
 2. Navigate to **API Keys** and create a new key
 3. Add a payment method and a small credit balance — a typical round (generation + debate + synthesis, 10 agents, detailed depth) costs $0.15–0.20; the first round of a session is ~$0.25 due to the cache write. A four-round session costs approximately $0.50–0.65
-4. Paste the key into the sidebar API key field — it is never stored, transmitted anywhere other than directly to the Anthropic API, or logged
+4. Select **Anthropic** in the provider section and paste the key — your browser's password manager can save it
 
-> **Note**: The Anthropic API is billed separately from a Claude.ai Pro subscription. The API key field is required — the tool will not work without it.
+> **Note**: The Anthropic API is billed separately from a Claude.ai Pro subscription. Both providers are available simultaneously in the sidebar; you can switch between them at any time.
 
 ---
 
@@ -153,7 +165,7 @@ The interface is divided into a **sidebar** (always visible) and a **main panel*
 | Section | Purpose |
 |---|---|
 | **Swarm title** (clickable) | Opens the brief editor modal |
-| **API key** | Your Anthropic API key |
+| **Provider** | Gemini (free, default) or Anthropic — radio selector + key field |
 | **Session cost** | Live cost tracker with cache hit rate |
 | **Agents** | Agent list with status, edit, and delete controls |
 | **Depth** | Brief / Detailed / Exhaustive output length |
@@ -391,25 +403,28 @@ A cache hit rate bar shows what fraction of input tokens are being served from c
 
 Different call types use different models, selectable or fixed:
 
-| Call type | Model | Control |
-|---|---|---|
-| Generation | Sonnet 4.6 | Fixed |
-| Debate | Sonnet 4.6 | Fixed |
-| Synthesis | Sonnet 4.6 or Opus 4.6 | **Sonnet/Opus toggle in sidebar** |
-| Meta-agent | Sonnet 4.6 or Opus 4.6 | Follows synthesis toggle |
-| Roster agent | Sonnet 4.6 or Opus 4.6 | Follows synthesis toggle |
-| Generation compression | Haiku 4.5 | Fixed (simple summarisation) |
-| Mandate generation | Haiku 4.5 | Fixed (simple drafting) |
+| Call type | Anthropic model | Gemini model | Control |
+|---|---|---|---|
+| Generation | Sonnet 4.6 | 2.5 Flash | Fixed |
+| Debate | Sonnet 4.6 | 2.5 Flash | Fixed |
+| Synthesis | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | **Sonnet/Opus toggle** (Anthropic only) |
+| Meta-agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
+| Roster agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
+| Generation compression | Haiku 4.5 | 2.5 Flash | Fixed (simple summarisation) |
+| Mandate generation | Haiku 4.5 | 2.5 Flash | Fixed (simple drafting) |
 
 Approximate token prices per million:
 
 | Model | Input | Output | Cache write | Cache read |
 |---|---|---|---|---|
+| Gemini 2.5 Flash | $0.30 | $2.50 | — | — |
 | Sonnet 4.6 | $3.00 | $15.00 | $3.75 | $0.30 |
 | Opus 4.6 | $15.00 | $75.00 | $18.75 | $1.50 |
 | Haiku 4.5 | $1.00 | $5.00 | $1.25 | $0.10 |
 
-The **Opus toggle** applies to synthesis, meta-agent, and roster agent calls only — the three calls where reasoning quality most directly affects the session's value, and where the calls are single rather than parallel batches, keeping the cost premium modest. Generation and debate remain on Sonnet regardless of the toggle.
+Within Google AI Studio's free daily quota, Gemini calls cost nothing. The prices above apply if you exceed the quota or switch to a paid Google Cloud billing account.
+
+The **Opus toggle** (Anthropic path only) applies to synthesis, meta-agent, and roster agent calls — the three calls where reasoning quality most directly affects the session's value. On Gemini, the toggle is greyed out; all roles use Gemini 2.5 Flash. Generation and debate remain on the strong model regardless of the toggle.
 
 ### Reducing or eliminating API costs
 
@@ -430,9 +445,9 @@ If your research falls within scope, these programmes represent the most cost-ef
 
 **Google Gemini free API tier**
 
-As an alternative for independent researchers or those outside the Anthropic programme scopes, Google's Gemini API offers a free tier requiring only a Google account — no credit card, no application process. As of mid-2026, Gemini 2.5 Flash is available on the free tier with a daily request quota. Gemini 2.5 Pro was removed from the free tier in April 2026 and requires a paid plan.
+As of v4.4.0, Gemini is the default provider in Research Swarm — no Anthropic billing is required. Gemini 2.5 Flash is available on the free tier with a daily request quota, requiring only a Google account. Gemini 2.5 Pro was removed from the free tier in April 2026 and requires a paid plan.
 
-The free tier carries a data-use clause (Google may use inputs and outputs to improve their products) and has rate limits that would require reducing parallel agent calls or accepting slower session execution. A Gemini-compatible fork of Research Swarm is a potential future direction — see [GitHub issue #6](https://github.com/DBoocock/research-swarm/issues/6) for the current thinking on this.
+The free tier carries a data-use clause (Google may use inputs and outputs to improve their products). Agent calls run sequentially on the Gemini path (rather than in parallel) to respect the free-tier rate limit of 10 requests per minute — sessions take somewhat longer but cost nothing within the daily quota.
 
 ---
 
@@ -540,8 +555,8 @@ The brief is the largest single cost driver in the tool. Two principles apply:
 
 **Mandates are billed at full price per call** — they are intentionally kept outside the cached block so that editing one agent's mandate does not invalidate the shared cache for all other agents. Keep individual mandates under ~300 tokens (~1,200 characters) each.
 
-### Primer-then-parallel generation
-Cache entries only become available after a response begins streaming — they are not available for concurrent parallel requests. To exploit this, agent[0] runs alone first (writing the cache), then agents[1–N] run in parallel (reading from the warm cache). This adds the latency of one serial agent call at the start of each generation round but saves ~90% of the brief input cost for all subsequent agents.
+### Primer-then-parallel generation (Anthropic path)
+Cache entries only become available after a response begins streaming — they are not available for concurrent parallel requests. To exploit this, agent[0] runs alone first (writing the cache), then agents[1–N] run in parallel (reading from the warm cache). This adds the latency of one serial agent call at the start of each generation round but saves ~90% of the brief input cost for all subsequent agents. On the Gemini path there is no prompt caching, so all agents run sequentially with a small inter-call delay instead.
 
 ### Mandate as uncached second block
 The agent mandate follows the cached brief as a separate, uncached block. Editing one agent's mandate does not invalidate the shared cache for other agents' calls. All ten agents share a single cache entry, written once and read nine times per generation round.
@@ -567,17 +582,19 @@ After the first round, the generation button only runs agents with no existing o
 
 The entire application is a single HTML file with no external dependencies beyond:
 - Google Fonts (DM Mono, Instrument Serif) — loaded from `fonts.googleapis.com`
-- The Anthropic API — called directly from the browser using the `anthropic-dangerous-direct-browser-access: true` header
+- The active API provider — either the Anthropic API (using the `anthropic-dangerous-direct-browser-access: true` header) or the Google Gemini API, called directly from the browser
 
 There is no build step, no bundler, no package manager, and no server-side component. All state is held in memory in the browser tab. The application can be served from a local filesystem, a static file host, or GitHub Pages.
 
 ### API calls made during a session
 
-| Call type | Model | System prompt | Caching |
-|---|---|---|---|
-| Generation (per agent) | Sonnet 4.6 | Cached brief + uncached mandate | ✅ Cached brief |
-| Debate (per responding agent) | Sonnet 4.6 | Cached brief + uncached mandate | ✅ Cached brief |
-| Generation compression (batched) | **Haiku 4.5** | Cached brief | ✅ Cached brief |
+| Call type | Anthropic model | Gemini model | Caching (Anthropic) | Gemini parallelism |
+|---|---|---|---|---|
+| Generation (per agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Sequential |
+| Debate (per responding agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Sequential |
+| Generation compression (batched) | **Haiku 4.5** | 2.5 Flash | ✅ Cached brief | Sequential |
+
+On the Anthropic path, the primer agent runs first to write the cache, then all remaining agents run in parallel reading from it. On the Gemini path, all agents run sequentially with a 1,500 ms inter-call delay to stay within the free-tier 10 RPM limit. Prompt caching is an Anthropic-specific feature and is not used on the Gemini path.
 | Synthesis | Sonnet 4.6 / **Opus 4.6** | Cached brief only | ✅ Cached brief |
 | Meta-agent | Sonnet 4.6 / **Opus 4.6** | Plain string | ❌ |
 | Roster agent | Sonnet 4.6 / **Opus 4.6** | Cached brief | ✅ Cached brief |
@@ -629,7 +646,7 @@ Research Swarm applies a well-established approach — multi-agent debate among 
 
 ## AI disclosure
 
-Research Swarm is a tool that calls the [Anthropic](https://www.anthropic.com) API to run AI language model agents. All reasoning in a swarm session is performed by Claude (`claude-sonnet-4-6`) via the Anthropic API.
+Research Swarm is a tool that calls an AI language model API to run agents. Depending on the selected provider, all reasoning in a swarm session is performed either by Claude (`claude-sonnet-4-6` via the [Anthropic](https://www.anthropic.com) API) or by Gemini (`gemini-2.5-flash` via the [Google Gemini](https://ai.google.dev) API).
 
 **Licensing**: Anthropic's usage policy governs what the API may be used for, but does not require attribution for software built on top of it. Using the Claude API is a commercial relationship (you pay per token) and does not create any intellectual property obligation toward Anthropic in the outputs or in derivative software. Research Swarm itself is independently licensed under MIT.
 

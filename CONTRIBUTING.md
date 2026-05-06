@@ -14,13 +14,15 @@ Open `index.html` in a browser. No build step, no server, no dependencies beyond
 
 **Single file by design.** Everything lives in `index.html`. This is a deliberate constraint: the tool is meant to be trivially shareable and deployable from a filesystem or GitHub Pages without any infrastructure. If you feel the urge to split it into modules, that's a signal the feature is probably too complex for this tool's scope, not that the constraint should be relaxed.
 
+This constraint is worth revisiting as the codebase grows. The current size (~1,957 lines) is manageable, but the multi-provider API work (issue #6) may push complexity to the point where a modular source tree becomes the right call. The user-facing single-file experience can be preserved even with a multi-file source tree by introducing a lightweight build step (e.g. `esbuild` or a simple concatenation script) that bundles everything into a single `index.html` for distribution. This would be an acceptable evolution if the alternative is provider logic becoming genuinely hard to navigate in a single file. The decision should be revisited explicitly after the issue #6 merge. Until then, the single-file constraint holds.
+
 **The brief is the primary lever.** The application is domain-agnostic. Adapting it to a new research problem means editing the brief — problem context, research context, available data — not touching the code. The agent mandates are secondary. The generation, debate, synthesis, and meta-agent machinery is fully domain-agnostic and should stay that way.
 
 **Caching is structured around one invariant (Anthropic path only).** The combined brief (all three fields) is sent as a single cached block with every generation and debate call. The agent mandate follows as a separate uncached block. This means: editing the brief invalidates the cache for all agents simultaneously; editing one mandate does not affect others. Any change to how prompts are assembled needs to preserve this invariant or explicitly justify breaking it. Prompt caching is Anthropic-specific — do not attempt to port it to other providers.
 
-**Model routing by call type.** Different calls use different models — see the `MODELS` constant and `resolveModel()` in the source. The principle: use the cheapest model that produces adequate quality for the task. Generation and debate use Sonnet (reasoning depth matters, parallel cost is manageable). Synthesis and meta-agent are configurable (Sonnet default, Opus available for harder problems). Compression and mandate generation use the cheapest available model (Haiku on Anthropic, Flash-equivalent on Gemini) — simple tasks where reasoning depth is not needed.
+**Model routing by call type.** Different calls use different models — see the `MODELS` constant and `modelFor()` in the source. `MODELS` is two-dimensional: `MODELS[role][provider]`. `modelFor(role)` resolves the correct string for the active provider and respects the Sonnet/Opus toggle (Anthropic only). The principle: use the cheapest model that produces adequate quality for the task. Generation and debate use the strong model (Sonnet / Gemini 2.5 Flash). Synthesis and meta-agent are configurable on Anthropic (Sonnet default, Opus available); on Gemini the toggle is greyed out. Compression and mandate generation use the cheapest available model — simple tasks where reasoning depth is not needed.
 
-**Provider abstraction.** The tool is moving toward supporting multiple API providers (Anthropic and Google Gemini initially) via a clean provider abstraction layer. All provider-specific logic — endpoint, auth, request format, streaming format, caching — should be isolated behind this interface. Adding a new provider should require no changes outside the provider layer. Prompt caching is Anthropic-specific and should not be ported to other providers.
+**Provider abstraction.** The tool supports multiple API providers via a clean provider abstraction layer. Gemini is the default (free within Google AI Studio quota); Anthropic remains fully available. All provider-specific logic — endpoint, auth, request format, streaming format, caching — is isolated in the `AnthropicProvider` and `GeminiProvider` objects. The unified `apiStream()` function dispatches to the active provider. Adding a third provider means: implement a provider object, add a column to `MODELS`, add `PRICING` entries, add a UI radio option. No changes elsewhere. Prompt caching is Anthropic-specific — do not port it. On Gemini, `callParallel()` runs calls sequentially with a 1,500 ms delay to respect free-tier RPM limits; on Anthropic it uses `Promise.all`.
 
 **State lives in memory.** There is no localStorage, no server, no database. Session state is exported as JSON after every synthesis and can be re-imported. This is deliberate — explicit export/import is more transparent and reliable than implicit browser storage, and avoids false durability expectations. Do not add localStorage without a strong reason and an explicit user control to clear it.
 
@@ -42,7 +44,7 @@ The API key field uses a proper HTML `<form>` with `autocomplete="current-passwo
 
 **Debate pairings not updated between rounds.** Confirmed bug where meta-agent proposals are not applied at debate launch in some rounds, causing identical pairings to repeat. Intermittent — suspected interaction with mid-session agent addition. See issue #7.
 
-**Free/low-cost version.** The tool currently requires Anthropic API billing even for users with existing Claude subscriptions. Google Gemini 2.5 Flash (free tier, no credit card required) is the proposed default provider. Implementation is in progress on the `feature/multi-provider-api` branch. See issue #6.
+**Free/low-cost version.** ✓ Resolved in v4.4.0. Google Gemini 2.5 Flash is now the default provider (free within Google AI Studio daily quota). Anthropic remains fully available. See issue #6 and CHANGELOG.
 
 ---
 
@@ -51,7 +53,7 @@ The API key field uses a proper HTML `<form>` with `autocomplete="current-passwo
 - A focused change with a clear rationale. The commit message should explain *why*, not just *what*.
 - Changes that preserve the single-file constraint and the brief-as-lever principle.
 - If you're changing prompt structure, explain how the change interacts with caching.
-- If you're adding a new agent call type, add it to the `MODELS` constant with a reasoning note.
+- If you're adding a new agent call type, add it to the `MODELS` constant (one entry per provider) with a reasoning note.
 - If you're adding UI, keep it consistent with the existing sidebar/tab/panel structure.
 
 ## What to avoid
