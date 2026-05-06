@@ -1,8 +1,10 @@
 # Research Swarm
 
-A multi-agent AI framework for prototyping theoretical research directions. Specialist agents with distinct disciplinary mandates work in parallel to generate, debate, and synthesise research angles on complex systems — with full control over the research brief, agent roster, debate pairings, and cost.
+Research Swarm is a multi-agent AI framework for prototyping theoretical research directions. Specialist agents with distinct disciplinary mandates generate, debate, and synthesise research angles on a problem in parallel — with full researcher control over the brief, roster, debate pairings, and cost. The entire tool runs as a single HTML file opened directly in the browser: no server, no build step, no package manager, no GPU.
 
 Originally built to study the dynamics of community rock climb difficulty grading systems, but fully generalisable to any research domain by editing the brief and agent mandates.
+
+The tool is built on the well-established multi-agent debate framework and is not a novel research contribution. Its distinct position is practical: it prioritises researcher control and interpretability over automation, runs without any infrastructure, and is designed to be cost-aware. Whether it produces useful research outputs has not yet been systematically evaluated — see [issue #3](https://github.com/DBoocock/research-swarm/issues/3). If you use the tool for research, feedback on what works and what doesn't is genuinely useful and is currently the primary source of evidence about its value.
 
 ---
 
@@ -25,6 +27,7 @@ Originally built to study the dynamics of community rock climb difficulty gradin
 - [Token optimisation details](#token-optimisation-details)
 - [Architecture](#architecture)
 - [Default agent roster](#default-agent-roster)
+- [Related work and context](#related-work-and-context)
 - [AI disclosure](#ai-disclosure)
 - [Licence](#licence)
 
@@ -32,15 +35,71 @@ Originally built to study the dynamics of community rock climb difficulty gradin
 
 ## How it works
 
-The swarm operates in two rounds per iteration, followed by automated synthesis and meta-agent analysis.
+The swarm operates as an iterative loop of generation, debate, and synthesis rounds — all steered by the researcher at each step. The diagram below shows the full session lifecycle, including the roster agent which sits outside the main loop as an advisory tool.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        RESEARCH BRIEF                           │
+│          (title · problem context · research context ·          │
+│           available data — all editable, cached by API)         │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │   GENERATION ROUND    │  ← agents run in parallel,
+                    │  each agent reads     │    each seeing only their
+                    │  brief + own mandate  │    own mandate
+                    └───────────┬───────────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │  POST-GEN SYNTHESIS   │  ← convergences · tensions ·
+                    │  (arbitration agent)  │    tractable first step ·
+                    └───────────┬───────────┘    blind spots · directions
+                                │
+                    ┌───────────▼───────────┐
+                    │     META-AGENT        │  ← proposes typed debate
+                    │   PROPOSALS           │    pairings and agent status
+                    └───────────┬───────────┘    changes for next round
+                                │
+                    ┌───────────▼───────────┐
+                    │  YOU REVIEW & ACCEPT  │  ← toggle pairs on/off,
+                    │  pairing proposals    │    accept/reject status
+                    └───────────┬───────────┘    changes
+                                │
+                    ┌───────────▼───────────┐
+                    │     DEBATE ROUND      │  ← each agent reads assigned
+                    │  paired agents read   │    partners' generation output
+                    │  each other's output  │    and responds critically
+                    └───────────┬───────────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │ POST-DEBATE SYNTHESIS │  ← same structure as above;
+                    │  (arbitration agent)  │    generation outputs first
+                    └───────────┬───────────┘    compressed to ~80 words
+                                │
+                    ┌───────────▼───────────┐
+                    │     META-AGENT        │
+                    │   PROPOSALS           │
+                    └───────────┬───────────┘
+                                │
+                         repeat ▼ or end session
+
+           ┌──────────────────────────────────────────┐
+           │  ROSTER AGENT  (run at any time)          │
+           │  Analyses brief + all mandates to suggest │
+           │  new agents · status changes · mandate    │
+           │  drift corrections · overlap assessments  │
+           └──────────────────────────────────────────┘
+```
 
 **Generation round**: Selected agents receive the shared research brief plus their individual specialist mandate. On the first round all selected agents run; on subsequent rounds only newly added agents run — existing generation outputs are preserved. Agents run in primer-then-parallel order (the first agent alone to write the cache, then the rest in parallel reading from it).
 
-**Debate round**: The meta-agent assigns debate pairings — agents are assigned one or more partners whose generation output they read and respond to. Multiple pairings per agent are allowed and encouraged. Debates are batched: an agent with three partners makes one API call rather than three, with responses labelled per partner.
+**Debate round**: Agents are assigned one or more partners whose generation output they read and respond to. Multiple pairings per agent are allowed and encouraged. Debates are batched: an agent with three partners makes one API call rather than three, with responses labelled per partner. Pairings are proposed by the meta-agent after each synthesis and reviewed by you before the debate launches.
 
 **Synthesis**: An arbitration agent reads all generation and debate outputs and produces a concise structured synthesis with explicit word limits per section: convergences, tensions, the single most tractable first empirical step, blind spots, tagged research directions, and a contradiction log.
 
-**Meta-agent**: After synthesis, a meta-agent proposes debate pairings for the next round (with typed justifications: CONTRADICTION, INTERSECTION, DISRUPTION, or BRIDGE) and recommends agent status changes (active, generation-only, retired, promoted). You review and accept or reject each recommendation before the next round launches.
+**Meta-agent**: After each synthesis, a meta-agent proposes debate pairings for the next round (typed as CONTRADICTION, INTERSECTION, DISRUPTION, or BRIDGE) and recommends agent status changes (active, generation-only, retired, promoted). You review and accept or reject each recommendation before the next round launches.
+
+**Roster agent**: A separate advisory agent, available at any time, that analyses the current brief and all agent mandates together. It suggests new agents to add (with draft mandates), flags mandate drift, recommends status changes, and assesses overlap between agent pairs. It is distinct from the meta-agent: the meta-agent reacts to what agents actually produced in a round; the roster agent reasons prospectively about the design of the roster itself.
 
 This cycle repeats. Research directions, contradictions, and matrix entries accumulate across rounds and are preserved in the session log.
 
@@ -78,7 +137,7 @@ That is all that is required. There is no npm install, no server to run, and no 
 
 1. Go to [console.anthropic.com](https://console.anthropic.com) and create an account
 2. Navigate to **API Keys** and create a new key
-3. Add a payment method and a small credit balance — a full session of multiple rounds costs between $0.10 and $0.50 depending on depth and number of agents
+3. Add a payment method and a small credit balance — a typical round (generation + debate + synthesis, 10 agents, detailed depth) costs $0.15–0.20; the first round of a session is ~$0.25 due to the cache write. A four-round session costs approximately $0.50–0.65
 4. Paste the key into the sidebar API key field — it is never stored, transmitted anywhere other than directly to the Anthropic API, or logged
 
 > **Note**: The Anthropic API is billed separately from a Claude.ai Pro subscription. The API key field is required — the tool will not work without it.
@@ -354,7 +413,7 @@ The **Opus toggle** applies to synthesis, meta-agent, and roster agent calls onl
 
 ### Reducing or eliminating API costs
 
-A typical Research Swarm session costs $0.15–0.25 at detailed depth. For occasional use this is modest, but several routes exist to reduce or eliminate the cost entirely.
+A typical round (generation + debate + synthesis, 10 agents, detailed depth) costs $0.15–0.20 after the first round; the first round of a session costs ~$0.25 due to the one-time cache write. A four-round session at detailed depth costs approximately $0.50–0.65. For occasional use this is modest, but several routes exist to reduce or eliminate the cost entirely.
 
 **Anthropic credit programmes**
 
@@ -547,6 +606,24 @@ The swarm ships with ten specialist agents. All mandates are editable and all ag
 | **Measurement theory** | Psychophysics, multidimensionality, conjoint measurement, scale validity, rank-reversal |
 | **Information theory** | Channel capacity, anchoring as compression, censored channels, mutual information, entropy rate |
 | **Statistical / extreme value theory** | GEV distributions, order statistics, records theory, tail sampling, outlier analysis |
+
+---
+
+## Related work and context
+
+Research Swarm applies a well-established approach — multi-agent debate among agents with heterogeneous disciplinary personas — to the problem of theoretical research ideation. This space is active and well-populated. Researchers should be aware of the following comparable systems before deciding whether Research Swarm fits their needs:
+
+| System | Approach | Key difference from Research Swarm |
+|---|---|---|
+| [Perspectra](https://arxiv.org/abs/2509.20553) (UIUC / Allen AI, 2025) | Forum-style multi-agent deliberation among user-chosen expert personas, with mind-map visualisation and empirical user study | Academically evaluated; richer visualisation UI; requires a server or hosted deployment |
+| [IDVSCI](https://arxiv.org/abs/2506.18348) | Dynamic knowledge exchange and dual-diversity review among heterogeneous agents | Automated pipeline with no human steering of individual rounds |
+| [The AI Scientist](https://github.com/SakanaAI/AI-Scientist) (Sakana AI) | Fully automated research lifecycle: ideation → experiments → manuscript | Requires Linux, NVIDIA GPU, conda environment; targets ML research specifically |
+| [SciAgents](https://pmc.ncbi.nlm.nih.gov/articles/PMC12138853/) | Multi-agent graph reasoning for materials science ideation | Domain-specific; automated; no human-in-the-loop |
+| [ResearchAgent](https://arxiv.org/abs/2404.07738) (Baek et al., 2024) | Knowledge-augmented single agent for idea generation and refinement | Single agent; literature-grounded; requires backend infrastructure |
+
+**Where Research Swarm sits differently**: it is human-in-the-loop by design (the researcher reviews and steers every round rather than receiving a fully automated output), runs as a single HTML file in the browser with no infrastructure, is domain-agnostic via an editable brief, and is cost-aware by architecture. These are practical rather than conceptual distinctions — the underlying multi-agent debate approach is shared with the academic literature.
+
+**Current limitations**: the tool has not been systematically evaluated against single-agent baselines or compared to the systems above. It is not known whether the debate round adds value over generation alone, or how output quality scales with roster size and session length. These are open questions — see [issue #3](https://github.com/DBoocock/research-swarm/issues/3). If you use the tool for research, your feedback on what works and what doesn't is genuinely useful and is currently the primary source of evidence about its value.
 
 ---
 
