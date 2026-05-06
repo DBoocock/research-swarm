@@ -1,5 +1,18 @@
 # Changelog
 
+## v4.3.1
+
+### Documentation and minor bug fixes
+
+- **`index.html`**: Fixed stale model string in `priceFor()` fallback — the key `'claude-sonnet-4-20250514'` no longer existed in the `PRICING` object, so the fallback would silently return `undefined` for any unrecognised model. Corrected to `'claude-sonnet-4-6'`.
+- **`README.md`**: Updated two stale `claude-sonnet-4-20250514` model string references (Getting started requirements; AI disclosure section) to `claude-sonnet-4-6`.
+- **`README.md`**: Corrected Haiku 4.5 pricing in the model pricing table: input $0.80 → $1.00, output $4.00 → $5.00, cache write $1.00 → $1.25, cache read $0.08 → $0.10 per million tokens.
+- **`README.md`**: Updated model labels in pricing table from "Sonnet 4" / "Opus 4" to "Sonnet 4.6" / "Opus 4.6".
+- **`README.md`**: Corrected Haiku cost ratio claim from "~4× cheaper than Sonnet" to "~3× cheaper" (Haiku input is $1/MTok vs Sonnet's $3/MTok).
+- **`README.md`**: Removed localStorage from Contributing suggestions and replaced with a note clarifying it is explicitly out of scope per the design principles in CONTRIBUTING.md.
+
+---
+
 ## v4.3.0
 
 ### Tighter synthesis output (~60% token reduction)

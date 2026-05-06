@@ -51,7 +51,7 @@ This cycle repeats. Research directions, contradictions, and matrix entries accu
 ### Requirements
 
 - A modern web browser (Chrome, Firefox, Safari, Edge)
-- An Anthropic API key with access to `claude-sonnet-4-20250514`
+- An Anthropic API key with access to `claude-sonnet-4-6`
 - No server, build step, or internet connection beyond the Anthropic API
 
 ### Installation
@@ -346,9 +346,9 @@ Approximate token prices per million:
 
 | Model | Input | Output | Cache write | Cache read |
 |---|---|---|---|---|
-| Sonnet 4 | $3.00 | $15.00 | $3.75 | $0.30 |
-| Opus 4 | $15.00 | $75.00 | $18.75 | $1.50 |
-| Haiku 4.5 | $0.80 | $4.00 | $1.00 | $0.08 |
+| Sonnet 4.6 | $3.00 | $15.00 | $3.75 | $0.30 |
+| Opus 4.6 | $15.00 | $75.00 | $18.75 | $1.50 |
+| Haiku 4.5 | $1.00 | $5.00 | $1.25 | $0.10 |
 
 The **Opus toggle** applies to synthesis, meta-agent, and roster agent calls only — the three calls where reasoning quality most directly affects the session's value, and where the calls are single rather than parallel batches, keeping the cost premium modest. Generation and debate remain on Sonnet regardless of the toggle.
 
@@ -467,7 +467,7 @@ When an agent is assigned multiple debate partners, all debates are batched into
 For post-debate synthesis, generation outputs are first compressed to ~80 words each in a single batched Haiku call. The compressed summaries replace full generation outputs in the synthesis input. Debate outputs are passed at full length. This prevents synthesis input from growing unboundedly as rounds accumulate.
 
 ### Haiku for low-reasoning tasks
-Generation compression and mandate generation use Haiku (~4× cheaper than Sonnet for input and output tokens). These are simple summarisation and drafting tasks where reasoning depth does not affect quality.
+Generation compression and mandate generation use Haiku (~3× cheaper than Sonnet for input and output tokens). These are simple summarisation and drafting tasks where reasoning depth does not affect quality.
 
 ### Tightly constrained synthesis prompt
 The synthesis prompt specifies exact word limits per section (60 / 80 / 50 / 40 words for the prose sections, short titles only for research directions, 15-word field caps for contradictions). This reduces synthesis output from ~2,900 tokens to ~600–800 tokens — a saving of roughly $0.03 per synthesis call at Sonnet rates. The `max_tokens` for synthesis is set to 1,200 to match.
@@ -525,7 +525,7 @@ The swarm ships with ten specialist agents. All mandates are editable and all ag
 
 ## AI disclosure
 
-Research Swarm is a tool that calls the [Anthropic](https://www.anthropic.com) API to run AI language model agents. All reasoning in a swarm session is performed by Claude (`claude-sonnet-4-20250514`) via the Anthropic API.
+Research Swarm is a tool that calls the [Anthropic](https://www.anthropic.com) API to run AI language model agents. All reasoning in a swarm session is performed by Claude (`claude-sonnet-4-6`) via the Anthropic API.
 
 **Licensing**: Anthropic's usage policy governs what the API may be used for, but does not require attribution for software built on top of it. Using the Claude API is a commercial relationship (you pay per token) and does not create any intellectual property obligation toward Anthropic in the outputs or in derivative software. Research Swarm itself is independently licensed under MIT.
 
@@ -554,5 +554,6 @@ Contributions welcome. The most useful additions would be:
 - New domain-specific brief templates (as separate markdown files)
 - Additional specialist agent mandate templates
 - UI improvements for the overlap matrix
-- Session state persistence via localStorage (for resuming sessions after tab close)
-- Support for other Anthropic models (Opus for deeper synthesis, Haiku for cheap compression calls)
+- Evaluation methodology for comparing swarm outputs against single-agent baselines
+
+> **Note**: Session state persistence via localStorage is explicitly out of scope — explicit export/import is a design principle, not a gap. See the *No localStorage for session state* principle in CONTRIBUTING.md.
