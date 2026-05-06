@@ -190,7 +190,7 @@ To create an agent with overlapping expertise (for productive debate tension), c
 
 1. **Configure the brief** — click the title to open the brief editor. For a new domain, replace all five fields. For the default climbing grading domain, the brief is pre-populated.
 
-2. **Select agents** — start with all agents selected for the first generation round. You can deselect agents that seem less relevant after reading the roster agent's recommendations.
+2. **Select agents** — consider starting with a smaller, familiar subset: 3–5 agents whose disciplinary backgrounds overlap with your own, or that you expect to be most directly relevant to the problem. This keeps the initial outputs interpretable — if an agent in a familiar field produces something shallow or wrong, you'll notice; if an unfamiliar one does, you might not. It also keeps the first debate focused enough to follow closely. Once you've run a round or two and have a feel for the terrain, use the roster agent to identify gaps and bring in new agents to expand the horizon. That said, starting with all agents is a reasonable choice for rapid domain mapping — the tradeoff is breadth vs. legibility in the early rounds.
 
 3. **Choose depth** — `brief` (~180 words per agent) for rapid exploration, `detailed` (~320 words) for standard sessions, `exhaustive` (~500 words) for deep dives into specific directions.
 
@@ -412,6 +412,10 @@ The climbing grading system is the default domain, but the swarm is fully domain
 3. **Run the roster agent** to check for mandate drift, gaps in coverage, and unexplored overlaps given the new brief.
 
 4. **Consider adding or removing agents** to match the disciplinary landscape of your domain. The + new button and roster agent suggestions are the fastest routes.
+
+### On roster size when starting in a new domain
+
+Resist the temptation to immediately populate a full ten-agent roster. Starting with the 3–5 agents whose frameworks you know best lets you validate that the brief and mandates are producing sensible outputs before expanding — it's much easier to spot a weak mandate in a familiar discipline than an unfamiliar one. Once the brief is stable and the initial rounds look productive, the roster agent is well-suited to the expansion step: it can survey what's missing and suggest new agents with draft mandates grounded in the current brief.
 
 ### Intended problem characteristics
 
