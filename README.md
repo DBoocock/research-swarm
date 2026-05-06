@@ -352,6 +352,29 @@ Approximate token prices per million:
 
 The **Opus toggle** applies to synthesis, meta-agent, and roster agent calls only — the three calls where reasoning quality most directly affects the session's value, and where the calls are single rather than parallel batches, keeping the cost premium modest. Generation and debate remain on Sonnet regardless of the toggle.
 
+### Reducing or eliminating API costs
+
+A typical Research Swarm session costs $0.15–0.25 at detailed depth. For occasional use this is modest, but several routes exist to reduce or eliminate the cost entirely.
+
+**Anthropic credit programmes**
+
+Anthropic runs two grant programmes that provide free API credits to qualifying researchers. Both are applied for via a Google Form and reviewed monthly — the application burden is low relative to a formal grant proposal, though selection is competitive.
+
+| Programme | Who it's for | Credits | Application |
+|---|---|---|---|
+| [AI for Science](https://support.claude.com/en/articles/11199177-anthropic-s-ai-for-science-program) | Researchers at academic or nonprofit institutions working on high-impact scientific projects. Biology and life sciences prioritised, but physics, chemistry, environmental science, and other quantitative fields are in scope. | Up to $20,000 over 6 months | [Google Form](https://docs.google.com/forms/d/e/1FAIpQLSfwDGfVg2lHJ0cc0oF_ilEnjvr_r4_paYi7VLlr5cLNXASdvA/viewform?usp=header), reviewed first Monday of each month |
+| [External Researcher Access](https://support.claude.com/en/articles/9125743-what-is-the-external-researcher-access-program) | Researchers working specifically on AI safety and alignment topics Anthropic considers high priority. | Unspecified | Same application system |
+
+Both programmes award credits to API accounts, not to claude.ai subscriptions — they are directly compatible with Research Swarm. Individual researchers (including those without institutional affiliation) are eligible to apply; the institutional affiliation clause in the rules only applies if you *are* affiliated, requiring you to have obtained appropriate employer or institution consents.
+
+If your research falls within scope, these programmes represent the most cost-effective path: full Sonnet-quality performance at zero marginal cost. Note that accepted researchers grant Anthropic a licence to use their API inputs and outputs for product development and model training — check the [programme rules](https://www.anthropic.com/ai-for-science-program-rules) if this is a concern for your research data.
+
+**Google Gemini free API tier**
+
+As an alternative for independent researchers or those outside the Anthropic programme scopes, Google's Gemini API offers a free tier requiring only a Google account — no credit card, no application process. As of mid-2026, Gemini 2.5 Flash is available on the free tier with a daily request quota. Gemini 2.5 Pro was removed from the free tier in April 2026 and requires a paid plan.
+
+The free tier carries a data-use clause (Google may use inputs and outputs to improve their products) and has rate limits that would require reducing parallel agent calls or accepting slower session execution. A Gemini-compatible fork of Research Swarm is a potential future direction — see [GitHub issue #6](https://github.com/DBoocock/research-swarm/issues/6) for the current thinking on this.
+
 ---
 
 ## Saving and exporting
