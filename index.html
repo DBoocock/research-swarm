@@ -324,8 +324,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
   </div>
 
   <div class="cost-panel">
-    <div class="cost-panel-hdr"><span>Session cost</span><button onclick="resetCost()">reset</button></div>
+    <div class="cost-panel-hdr"><span id="cost-panel-title">Session cost</span><button onclick="resetCost()">reset</button></div>
     <div class="cost-total"><span class="cost-amount" id="cost-total">$0.0000</span><span class="cost-sublabel" id="cost-sublabel">this session</span></div>
+    <div id="rpd-warn" style="display:none;font-size:9px;color:var(--warn);line-height:1.4;margin-bottom:4px;"></div>
     <div class="cost-grid">
       <div class="cc"><span class="cc-label">Input tok</span><span class="cc-val" id="ci">0</span></div>
       <div class="cc"><span class="cc-label">Output tok</span><span class="cc-val" id="co">0</span></div>
@@ -707,32 +708,53 @@ function briefOnlyBlock(){
 // ══════════════════════════════════════════════════════════
 // COST
 // ══════════════════════════════════════════════════════════
-function resetCost(){costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[]};renderCost();}
+function resetCost(){costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[],callCount:0};renderCost();}
 function addUsage(name,u,model){
   const i=u.input_tokens||0,o=u.output_tokens||0,cw=u.cache_creation_input_tokens||0,cr=u.cache_read_input_tokens||0;
   const P=priceFor(model);
   costS.inp+=i;costS.out+=o;costS.cw+=cw;costS.cr+=cr;
   const c=i*P.inp+o*P.out+cw*P.cw+cr*P.cr;
-  const wc=(i+cr)*P.inp+o*P.out+cw*P.inp;
+  // Cache savings only meaningful on Anthropic path
+  const wc=(S.provider||'gemini')==='anthropic'?((i+cr)*P.inp+o*P.out+cw*P.inp):c;
   costS.total+=c;costS.saved+=Math.max(0,wc-c);
+  costS.callCount=(costS.callCount||0)+1;
   // Short model label for display
-  const mlbl=model?.includes('haiku')?'hku':model?.includes('opus')?'ops':'snt';
+  const mlbl=model?.includes('haiku')?'hku':model?.includes('opus')?'ops':
+    model?.includes('gemini')?'gem':'snt';
   costS.calls.unshift({name:name.slice(0,22),cost:c,hit:cr>0,cr,mlbl});
   renderCost();
 }
 function renderCost(){
-  document.getElementById('cost-total').textContent='$'+costS.total.toFixed(4);
+  const isGemini=(S.provider||'gemini')==='gemini';
+  const callCount=costS.callCount||0;
+  if(isGemini){
+    // On Gemini free tier, show call count rather than dollar cost
+    // (dollar amounts are near-zero and misleading — what matters is RPD quota)
+    document.getElementById('cost-total').textContent=callCount+' calls';
+  } else {
+    document.getElementById('cost-total').textContent='$'+costS.total.toFixed(4);
+  }
   document.getElementById('ci').textContent=costS.inp.toLocaleString();
   document.getElementById('co').textContent=costS.out.toLocaleString();
   document.getElementById('ccr').textContent=costS.cr.toLocaleString();
   document.getElementById('ccw').textContent=costS.cw.toLocaleString();
-  document.getElementById('cs').textContent='$'+costS.saved.toFixed(4);
+  document.getElementById('cs').textContent=isGemini?'n/a':'$'+costS.saved.toFixed(4);
   const tot=costS.inp+costS.cr+costS.cw;
-  const pct=tot>0?Math.round(costS.cr/tot*100):0;
-  document.getElementById('cpct').textContent=pct+'%';
+  const pct=(!isGemini&&tot>0)?Math.round(costS.cr/tot*100):0;
+  document.getElementById('cpct').textContent=isGemini?'n/a (no caching)':pct+'%';
   document.getElementById('cbar').style.width=pct+'%';
+  // RPD warning: flag if approaching typical free-tier limits
+  const rpdWarn=document.getElementById('rpd-warn');
+  if(rpdWarn){
+    if(isGemini&&callCount>=15){
+      rpdWarn.style.display='';
+      rpdWarn.textContent=`⚠ ${callCount} API calls used today. Free tier allows 20 RPD — pause if you see 429 errors.`;
+    } else {
+      rpdWarn.style.display='none';
+    }
+  }
   document.getElementById('call-log').innerHTML=costS.calls.slice(0,8).map(c=>
-    `<div class="cli"><span class="cli-name">${c.name}</span><span style="font-size:9px;color:var(--text3);margin-left:3px">${c.mlbl||''}</span><span class="cli-cost">$${c.cost.toFixed(4)}</span>${c.hit?`<span class="cli-cache">⚡${c.cr.toLocaleString()}</span>`:''}</div>`
+    `<div class="cli"><span class="cli-name">${c.name}</span><span style="font-size:9px;color:var(--text3);margin-left:3px">${c.mlbl||''}</span><span class="cli-cost">${isGemini?'':('$'+c.cost.toFixed(4))}</span>${c.hit?`<span class="cli-cache">⚡${c.cr.toLocaleString()}</span>`:''}</div>`
   ).join('');
 }
 
@@ -763,9 +785,19 @@ const resolveModel=modelFor;
 // API — provider abstraction
 // ══════════════════════════════════════════════════════════
 
-// Inter-call delay for Gemini free tier (sequential mode).
-// The free tier allows 10 RPM for 2.5 Flash; 1500 ms gives comfortable headroom.
-const GEMINI_INTER_CALL_DELAY_MS=1500;
+// Inter-call delays for Gemini free tier (sequential mode).
+// Free tier: 10 RPM (one request every 6s to stay safe), 20 RPD on restricted accounts.
+// GEMINI_INTER_CALL_DELAY_MS: delay between agent calls within callParallel.
+// GEMINI_POST_BATCH_DELAY_MS: delay before non-agent calls (compression, synthesis, meta)
+//   that fire immediately after the last agent call completes.
+const GEMINI_INTER_CALL_DELAY_MS=6000;  // 6s between agent calls → ~10 RPM max
+const GEMINI_POST_BATCH_DELAY_MS=6000;  // 6s pause before compression/synthesis/meta
+
+// Helper: insert a post-batch delay on Gemini path before calling compression/synth/meta
+async function geminiDelay(){
+  if((S.provider||'gemini')==='gemini')
+    await new Promise(r=>setTimeout(r,GEMINI_POST_BATCH_DELAY_MS));
+}
 
 // ── Anthropic provider ──────────────────────────────────
 const AnthropicProvider={
@@ -839,18 +871,37 @@ const GeminiProvider={
     const body={
       system_instruction:systemText?{parts:[{text:systemText}]}:undefined,
       contents,
-      generationConfig:{maxOutputTokens:maxTok}
+      generationConfig:{
+        maxOutputTokens:maxTok,
+        // Disable thinking entirely — thinking tokens consume the maxOutputTokens budget,
+        // leaving too few tokens for actual output and causing mid-sentence truncation.
+        // For our task (structured research proposals) thinking adds latency and cost
+        // but not quality benefit relative to the token budget constraint.
+        thinkingConfig:{thinkingBudget:0}
+      }
     };
     // Remove undefined keys
     if(!body.system_instruction)delete body.system_instruction;
 
     const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`;
-    const resp=await fetch(url,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body),signal
-    });
-    if(!resp.ok){const e=await resp.text();throw new Error(`Gemini API ${resp.status}: ${e.slice(0,200)}`);}
+    // Retry on 429 with exponential backoff — free tier RPM bursts can cause transient errors
+    let resp,lastErr;
+    for(let attempt=0;attempt<3;attempt++){
+      if(attempt>0){
+        const wait=attempt*15000; // 15s, then 30s
+        setStatus(`Rate limited (429) — retrying in ${wait/1000}s... (attempt ${attempt+1}/3)`);
+        await new Promise(r=>setTimeout(r,wait));
+      }
+      resp=await fetch(url,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body),signal
+      });
+      if(resp.ok)break;
+      if(resp.status!==429){const e=await resp.text();throw new Error(`Gemini API ${resp.status}: ${e.slice(0,200)}`);}
+      lastErr=await resp.text();
+    }
+    if(!resp.ok)throw new Error(`Gemini API 429 (quota exceeded after retries): ${lastErr?.slice(0,200)}\n\nThis is the daily request limit (RPD). Try again after midnight Pacific Time, or switch to the Anthropic provider.`);
 
     const reader=resp.body.getReader(),dec=new TextDecoder();
     let buf='',result='';
@@ -959,9 +1010,11 @@ function setProvider(p){
   const synthNote=document.getElementById('synth-anthropic-only');
   synthBtns.forEach(b=>b.disabled=p==='gemini');
   if(synthNote)synthNote.style.display=p==='gemini'?'':'none';
-  // Update cost sublabel
+  // Update cost panel for provider
   const lbl=document.getElementById('cost-sublabel');
-  if(lbl)lbl.textContent=p==='gemini'?'this session (free tier)':'this session';
+  if(lbl)lbl.textContent=p==='gemini'?'API calls today':'this session';
+  const ptitle=document.getElementById('cost-panel-title');
+  if(ptitle)ptitle.textContent=p==='gemini'?'Session usage':'Session cost';
   // Update status bar hint if session hasn't started
   if(!S.currentRound){
     setStatus(p==='gemini'
@@ -1214,7 +1267,8 @@ async function runGen(){
       await callParallel(allGenAgents.slice(1).map(a=>()=>makeAgentCall(a)));
     }
     updateRoundHdr(hdr,'done');tc('gen',allGenAgents.length);
-    setStatus('Generation complete. Compressing outputs for synthesis...');
+    setStatus('Generation complete.' + ((S.provider||'gemini')==='gemini'?' Pausing before synthesis (rate limit)...':' Compressing outputs for synthesis...'));
+    await geminiDelay();
     await runSynthesis(false);
   }catch(e){if(e.name!=='AbortError'){setStatus('Error: '+e.message);updateRoundHdr(hdr,'error');}}
   S.running=false;document.getElementById('run-btn').disabled=false;
@@ -1322,7 +1376,8 @@ async function runDebate(){
       await callParallel(debateEntries.slice(1).map(e=>()=>makeDebateCall(e)));
     }
     updateRoundHdr(hdr,'done');tc('deb',activePairs.length);
-    setStatus('Debate complete. Running synthesis...');
+    setStatus('Debate complete.' + ((S.provider||'gemini')==='gemini'?' Pausing before synthesis (rate limit)...':' Running synthesis...'));
+    await geminiDelay();
     await runSynthesis(true);
   }catch(e){if(e.name!=='AbortError')setStatus('Debate error: '+e.message);}
   S.running=false;document.getElementById('run-btn').disabled=false;
@@ -1406,6 +1461,7 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     updateRoundHdr(hdr,'done');tc('syn',1);
     setStatus('Synthesis complete. Running meta-agent...');
     parseSynthesis(result);
+    await geminiDelay();
     await runMeta(result);
     saveRound();
     autoExportJson();

@@ -1,5 +1,46 @@
 # Changelog
 
+## v4.4.1
+
+### Gemini free-tier fixes — rate limiting, output truncation, cost display
+
+Four bugs identified from first real-world test run on the Gemini free tier.
+
+#### Bug 1 — Output truncation (mid-sentence cutoff)
+
+Gemini 2.5 Flash has "thinking" enabled by default. Thinking tokens are consumed from the same `maxOutputTokens` budget as output text — with our `maxOutputTokens=1200` for generation, thinking was using 500–800 tokens, leaving only 400–700 tokens for actual output. This caused agents to cut off mid-sentence.
+
+Fix: `thinkingConfig:{thinkingBudget:0}` added to all Gemini `generationConfig` requests. This disables thinking entirely. For structured research proposals, thinking adds latency and token cost but no quality benefit relative to the budget constraint.
+
+#### Bug 2 — Rate limit (429) errors and RPD exhaustion
+
+The free tier allows 10 RPM and (on restricted accounts) only 20 RPD. A 10-agent generation round makes ~13 API calls (10 generation + 1 compression + 1 synthesis + 1 meta). The original 1500ms inter-call delay was insufficient: 10 agents at 1500ms delay can complete in under 60 seconds, then the three post-generation calls fire immediately, creating a burst that exceeds 10 RPM. Three subsequent runs then exhausted the 20 RPD entirely.
+
+Fixes:
+- **Inter-call delay increased**: `GEMINI_INTER_CALL_DELAY_MS` raised from 1,500ms to 6,000ms (6s between each agent call → safe ~10 RPM)
+- **Post-batch delay added**: new `geminiDelay()` helper inserts a 6s pause (`GEMINI_POST_BATCH_DELAY_MS`) before compression, synthesis, and meta calls, which previously fired with no delay immediately after the last agent
+- **429 retry with backoff**: Gemini provider now retries on 429 up to 3 times with 15s / 30s waits, with status bar updates. If quota is fully exhausted (RPD), the error message now explicitly says so and suggests waiting until midnight Pacific Time or switching to Anthropic
+- **RPD warning**: cost panel now shows a warning when ≥15 API calls have been made in the session, alerting the user that the 20 RPD limit is approaching
+
+#### Bug 3 — Cost display showing dollar amounts on Gemini
+
+The cost tracker was displaying a small dollar amount on the Gemini path (Gemini pricing × token counts). This is technically correct but misleading — what matters on the free tier is request count (RPD), not dollar cost.
+
+Fixes:
+- Cost panel title changes to "Session usage" on Gemini; total display shows "N calls" rather than "$0.00xx"
+- "Saved via caching" row shows "n/a" on Gemini (no caching on this path)
+- Cache hit rate shows "n/a (no caching)"
+- Model label in per-call log now shows "gem" for Gemini calls (was "snt" — same fallback as Sonnet)
+- Dollar amounts still accumulated internally for accurate cost reporting if provider is switched mid-session
+
+#### Session timing impact
+
+With 6s inter-call delays, a 10-agent generation round now takes approximately 90–120s (depending on model response time). This is slower than before but reliably stays within the free-tier rate limit. A full round (generation + debate + synthesis + meta) at 10 agents takes roughly 4–6 minutes on the Gemini free path.
+
+**Note**: the RPD limit (20 requests/day on restricted accounts) remains the binding constraint for multi-round sessions at 10 agents. Each full round (gen + debate + synth + meta) uses ~26 API calls. Users planning extended sessions should either use the Anthropic path or enable billing on their Google AI Studio account (which raises RPD substantially).
+
+---
+
 ## v4.4.0
 
 ### Multi-provider API support — Gemini 2.5 Flash (issue #6)
