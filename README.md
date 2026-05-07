@@ -8,6 +8,10 @@ The tool is built on the well-established multi-agent debate framework and is no
 
 ---
 
+> **Running Research Swarm costs less than you might expect.** The default provider is Google Gemini, which is free within Google AI Studio's daily quota. The recommended setup — [add a billing method to your Google AI Studio account](#gemini-billing-setup) — unlocks a generous free usage tier with no minimum spend. Most users will pay nothing. See [Gemini billing setup](#gemini-billing-setup) for the full picture before entering a credit card anywhere.
+
+---
+
 ## Contents
 
 - [How it works](#how-it-works)
@@ -22,6 +26,7 @@ The tool is built on the well-established multi-agent debate framework and is no
 - [Research map and contradiction tracker](#research-map-and-contradiction-tracker)
 - [Overlap matrix](#overlap-matrix)
 - [Cost tracking and prompt caching](#cost-tracking-and-prompt-caching)
+  - [Gemini billing setup](#gemini-billing-setup)
 - [Saving and exporting](#saving-and-exporting)
 - [Adapting to a new research domain](#adapting-to-a-new-research-domain)
 - [Token optimisation details](#token-optimisation-details)
@@ -445,9 +450,47 @@ If your research falls within scope, these programmes represent the most cost-ef
 
 **Google Gemini free API tier**
 
-As of v4.4.0, Gemini is the default provider in Research Swarm — no Anthropic billing is required. Gemini 2.5 Flash is available on the free tier with a daily request quota, requiring only a Google account. Gemini 2.5 Pro was removed from the free tier in April 2026 and requires a paid plan.
+As of v4.4.0, Gemini is the default provider in Research Swarm — no Anthropic billing is required. Gemini 2.5 Flash is available on the free tier with a daily request quota, requiring only a Google account.
 
-The free tier carries a data-use clause (Google may use inputs and outputs to improve their products). Agent calls run sequentially on the Gemini path (rather than in parallel) to respect the free-tier rate limit of 10 requests per minute — sessions take somewhat longer but cost nothing within the daily quota.
+The free tier carries a data-use clause: Google may use inputs and outputs to improve their products. Agent calls run sequentially on the Gemini path (rather than in parallel) to respect the free-tier rate limit of 10 requests per minute. Sessions take somewhat longer than the Anthropic path but cost nothing within the daily quota.
+
+<a name="gemini-billing-setup"></a>
+#### Gemini billing setup — the recommended approach
+
+Adding a billing method to your Google AI Studio account is the single most effective way to use Research Swarm at no cost. Despite what "adding billing" sounds like, it **does not mean you will be charged**. Here is what actually happens:
+
+Enabling billing moves your project from the no-billing free tier to the **Pay-as-you-go tier**. Google provides a free monthly usage allowance to all projects with billing enabled. Research Swarm's usage at Gemini 2.5 Flash rates is small enough that the vast majority of users will remain within this allowance. For reference, a typical 10-agent detailed session costs roughly $0.02–0.10, and the monthly free credit comfortably covers hundreds of such sessions.
+
+**What enabling billing changes:**
+
+| Metric | No billing (free tier) | Billing enabled (pay-as-you-go) |
+|---|---|---|
+| Requests per minute (RPM) | 10 | 1,000 |
+| Requests per day (RPD) | 20–250 (varies by account) | 10,000 |
+| Tokens per minute (TPM) | 250,000 | 4,000,000 |
+| Minimum spend | $0 | $0 |
+| Monthly free credit | None | Included |
+
+**Practical session capacity by roster size:**
+
+A full round (generation + debate + synthesis + meta-agent) makes approximately 13–28 API calls depending on roster size and number of debate pairs.
+
+| Roster size | Calls per full round | Rounds per day (no billing) | Rounds per day (billing enabled) |
+|---|---|---|---|
+| 5 agents | ~13 calls | ~1 | 700+ |
+| 8 agents | ~18 calls | ~1 | 500+ |
+| 10 agents | ~22 calls | 0–1 | 400+ |
+
+Without billing, the RPD limit (20–250 depending on your account age and region) is the binding constraint — a single 10-agent session can exhaust it. With billing enabled, the RPD limit is 10,000, which is effectively unlimited for research use.
+
+**How to set up billing:**
+
+1. Go to [aistudio.google.com](https://aistudio.google.com) and sign in
+2. Click the settings icon → **Billing** → **Enable billing** (or link an existing Google Cloud project with billing)
+3. Add a payment method — Google requires this to activate the tier, but will not charge it unless you exceed the free monthly credit
+4. To protect against unexpected charges, set a **monthly budget alert** (or a hard spending cap) in Google Cloud Console → Billing → Budgets & alerts. A cap of $1–5/month is a reasonable precaution for typical research use
+
+> **Can the spending cap be set to zero?** Google Cloud budget alerts can be set to notify you at $0 of spend, but a hard cap of exactly $0 is not supported — the minimum enforceable cap is $0.01. In practice this is not a concern: a 10-agent session costs approximately $0.02–0.10, so a $1 monthly cap gives you 10–50 full sessions before any charge is possible. You will receive an email alert long before approaching it.
 
 ---
 

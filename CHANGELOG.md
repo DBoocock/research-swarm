@@ -1,5 +1,32 @@
 # Changelog
 
+## v4.4.2
+
+### Bug fixes — retired agent ghost outputs and pairing loop
+
+Two related bugs identified from a 20-round session export.
+
+#### Bug 1 — Pairing loop: meta-agent reproposing identical pairs indefinitely
+
+From round 17 onward in the test session, the meta-agent produced word-for-word identical pairing and retirement proposals every round. Root cause: when the user accepts a retirement proposal, `S.agentStatuses[id]` is set to `'retired'`, but the agent's generation output remains in `S.currentGen`. Both `compressGenerationOutputs()` and the post-generation synthesis path iterate over `S.currentGen` without filtering by status — so retired agents' outputs continued feeding synthesis and the meta-agent prompt every round. The meta-agent correctly identified the agents as problematic and re-proposed their retirement, but accepting it again had no effect since the output was still present.
+
+Fixes:
+- `acceptRec()`: when a retirement proposal is accepted, `delete S.currentGen[rec.id]` removes the retired agent's output immediately. This is the root fix — the agent is now cleanly absent from all subsequent synthesis and meta-agent inputs
+- `compressGenerationOutputs()`: added `.filter(([id])=>S.agentStatuses[id]!=='retired')` as a second-line defence
+- `runSynthesis()` post-generation path: same filter applied to the `Object.entries(S.currentGen)` iteration
+
+#### Bug 2 — Retired agents feeding synthesis and meta-agent
+
+Same root cause as above. Agents retired in round N were visible to the synthesis agent and meta-agent in all subsequent rounds, producing synthesis sections attributing output to retired agents and causing the meta-agent to reason about agents it believed it had already removed.
+
+#### Session data observations (not bugs, but noted)
+
+- All generation outputs were identical across all 20 rounds. This is the intended behaviour of "smart generation" (outputs are only regenerated for newly added agents), but makes the limitation of issue #5 (reflection rounds) more apparent at scale. The meta-agent was reasoning about static R1 outputs for 20 rounds
+- `nonequil` was retired after R1 but remained in generation outputs every round — now fixed by the filter above
+- The three mid-session agents (Geospatial, Linguistics, Psychometrics) each produced the same output every round from their addition onward — again by design, but underscores issue #5
+
+---
+
 ## v4.4.1
 
 ### Gemini free-tier fixes — rate limiting, output truncation, cost display

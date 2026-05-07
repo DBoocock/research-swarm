@@ -1406,10 +1406,13 @@ async function runSynthesis(includeDebate){
     });
   } else {
     // Post-generation: use full outputs — first synthesis of the round
-    Object.entries(S.currentGen).forEach(([id,text])=>{
-      const agent=agents.find(a=>a.id===id);
-      allOutputs+=`\n\n=== ${agent?agent.name.toUpperCase():id} ===\n${text}`;
-    });
+    // Exclude retired agents whose outputs persist in S.currentGen
+    Object.entries(S.currentGen)
+      .filter(([id])=>S.agentStatuses[id]!=='retired')
+      .forEach(([id,text])=>{
+        const agent=agents.find(a=>a.id===id);
+        allOutputs+=`\n\n=== ${agent?agent.name.toUpperCase():id} ===\n${text}`;
+      });
   }
 
   const synthPrompt=`You have received outputs from a multi-agent theoretical research swarm. All outputs:\n${allOutputs}
@@ -1472,7 +1475,9 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
 // Compress generation outputs to ~80 words each in a single batched call
 // Optimisation: one API call with all outputs, returns structured summaries
 async function compressGenerationOutputs(){
-  const entries=Object.entries(S.currentGen);
+  // Exclude retired agents — their outputs persist in S.currentGen but should not
+  // feed synthesis or meta-agent prompts after retirement
+  const entries=Object.entries(S.currentGen).filter(([id])=>S.agentStatuses[id]!=='retired');
   if(!entries.length)return[];
   const agentBlocks=entries.map(([id,text])=>{
     const name=agents.find(a=>a.id===id)?.name||id;
@@ -1818,8 +1823,14 @@ function renderPairingsPanel(){
 function togglePair(i){S.pairingProposals[i].enabled=!S.pairingProposals[i].enabled;renderPairingsPanel();renderAgentList();}
 function acceptRec(i){
   const rec=S.retirementProposals[i];rec.accepted=!rec.accepted;
-  if(rec.accepted)S.agentStatuses[rec.id]=rec.status||'retired';
-  else S.agentStatuses[rec.id]='active';
+  if(rec.accepted){
+    S.agentStatuses[rec.id]=rec.status||'retired';
+    // Remove retired agent's generation output so it stops feeding synthesis
+    // and meta-agent prompts, preventing the pairing loop bug
+    if((rec.status||'retired')==='retired') delete S.currentGen[rec.id];
+  } else {
+    S.agentStatuses[rec.id]='active';
+  }
   renderAgentList();renderPairingsPanel();
 }
 
