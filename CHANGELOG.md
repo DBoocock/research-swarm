@@ -1,5 +1,34 @@
 # Changelog
 
+## v4.4.4
+
+### Flash Lite for cheap tasks; corrected Gemini billing documentation; cost display
+
+#### Gemini model routing
+
+- `compression` and `mandate` roles now use `gemini-2.5-flash-lite` on the Gemini path, matching the Anthropic pattern of using the cheaper model (Haiku) for simple summarisation and constrained rewriting tasks
+- Flash Lite pricing added to `PRICING` constant: $0.10/$0.40 per million tokens (vs Flash at $0.30/$2.50)
+- Estimated saving: ~10–15% per session; largest sessions save ~$0.05. Modest but correct in principle
+- Model label in per-call log now distinguishes `fls` (Flash 2.5) from `flt` (Flash Lite)
+
+#### Cost display
+
+- Dollar cost display restored on Gemini path — charges are real on the paid tier and should be visible
+- "Session usage" / "API calls" display reverted to standard "Session cost" / "$X.XXXX"
+- Per-call log now always shows dollar cost regardless of provider
+- Cache savings row shows "n/a (no caching)" on Gemini; RPD warning removed (not relevant for billing-enabled accounts)
+
+#### README corrections
+
+- Removed incorrect claim that "most users will pay nothing" and implied free monthly credit on pay-as-you-go tier — there is no free monthly credit; billing is pay-as-you-go from the first token
+- Added actual session cost estimates by roster size and depth
+- Billing setup section rewritten to accurately describe the trade-off
+- Top-level callout corrected
+- Pricing table updated with Flash Lite row
+- Model routing table updated to show Flash Lite for compression and mandate on Gemini
+
+---
+
 ## v4.4.3
 
 ### Bug fixes — duplicate pair proposals and stale proposal persistence

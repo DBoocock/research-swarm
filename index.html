@@ -501,8 +501,9 @@ const PRICING={
   'claude-sonnet-4-6':         {inp:3/1e6,    out:15/1e6,   cw:3.75/1e6,  cr:0.30/1e6},
   'claude-opus-4-6':           {inp:15/1e6,   out:75/1e6,   cw:18.75/1e6, cr:1.50/1e6},
   'claude-haiku-4-5-20251001': {inp:0.80/1e6, out:4/1e6,    cw:1/1e6,     cr:0.08/1e6},
-  // Gemini (billed if over free-tier quota; free within Google AI Studio daily limits)
+  // Gemini — billed pay-as-you-go on paid tier (no free monthly credit)
   'gemini-2.5-flash':          {inp:0.30/1e6, out:2.50/1e6, cw:0,         cr:0},
+  'gemini-2.5-flash-lite':     {inp:0.10/1e6, out:0.40/1e6, cw:0,         cr:0},
 };
 function priceFor(model){return PRICING[model]||PRICING['claude-sonnet-4-6'];}
 
@@ -659,8 +660,8 @@ const MODELS={
   synthesis:   {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
   meta:        {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
   roster:      {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
-  compression: {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash'},
-  mandate:     {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash'},
+  compression: {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap task: summarisation
+  mandate:     {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap task: constrained rewriting
 };
 
 const DEPTH_DIRS={
@@ -720,41 +721,29 @@ function addUsage(name,u,model){
   costS.callCount=(costS.callCount||0)+1;
   // Short model label for display
   const mlbl=model?.includes('haiku')?'hku':model?.includes('opus')?'ops':
-    model?.includes('gemini')?'gem':'snt';
+    model?.includes('flash-lite')?'flt':model?.includes('gemini')?'fls':'snt';
   costS.calls.unshift({name:name.slice(0,22),cost:c,hit:cr>0,cr,mlbl});
   renderCost();
 }
 function renderCost(){
   const isGemini=(S.provider||'gemini')==='gemini';
   const callCount=costS.callCount||0;
-  if(isGemini){
-    // On Gemini, show call count rather than dollar cost
-    // (dollar amounts are small; request count is what matters for quota tracking)
-    document.getElementById('cost-total').textContent=callCount+' calls';
-  } else {
-    document.getElementById('cost-total').textContent='$'+costS.total.toFixed(4);
-  }
+  // Always show dollar cost — charges are real on Gemini paid tier
+  document.getElementById('cost-total').textContent='$'+costS.total.toFixed(4);
   document.getElementById('ci').textContent=costS.inp.toLocaleString();
   document.getElementById('co').textContent=costS.out.toLocaleString();
   document.getElementById('ccr').textContent=costS.cr.toLocaleString();
   document.getElementById('ccw').textContent=costS.cw.toLocaleString();
-  document.getElementById('cs').textContent=isGemini?'n/a':'$'+costS.saved.toFixed(4);
+  document.getElementById('cs').textContent=isGemini?'n/a (no caching)':'$'+costS.saved.toFixed(4);
   const tot=costS.inp+costS.cr+costS.cw;
   const pct=(!isGemini&&tot>0)?Math.round(costS.cr/tot*100):0;
-  document.getElementById('cpct').textContent=isGemini?'n/a (no caching)':pct+'%';
+  document.getElementById('cpct').textContent=isGemini?'n/a':pct+'%';
   document.getElementById('cbar').style.width=pct+'%';
-  // RPD warning: flag if approaching typical free-tier limits
+  // RPD warning: only relevant on no-billing free tier (very low RPD)
   const rpdWarn=document.getElementById('rpd-warn');
-  if(rpdWarn){
-    if(isGemini&&callCount>=15){
-      rpdWarn.style.display='';
-      rpdWarn.textContent=`⚠ ${callCount} API calls used today. Free tier allows 20 RPD — pause if you see 429 errors.`;
-    } else {
-      rpdWarn.style.display='none';
-    }
-  }
+  if(rpdWarn)rpdWarn.style.display='none';
   document.getElementById('call-log').innerHTML=costS.calls.slice(0,8).map(c=>
-    `<div class="cli"><span class="cli-name">${c.name}</span><span style="font-size:9px;color:var(--text3);margin-left:3px">${c.mlbl||''}</span><span class="cli-cost">${isGemini?'':('$'+c.cost.toFixed(4))}</span>${c.hit?`<span class="cli-cache">⚡${c.cr.toLocaleString()}</span>`:''}</div>`
+    `<div class="cli"><span class="cli-name">${c.name}</span><span style="font-size:9px;color:var(--text3);margin-left:3px">${c.mlbl||''}</span><span class="cli-cost">$${c.cost.toFixed(4)}</span>${c.hit?`<span class="cli-cache">⚡${c.cr.toLocaleString()}</span>`:''}</div>`
   ).join('');
 }
 
@@ -1010,11 +999,11 @@ function setProvider(p){
   const synthNote=document.getElementById('synth-anthropic-only');
   synthBtns.forEach(b=>b.disabled=p==='gemini');
   if(synthNote)synthNote.style.display=p==='gemini'?'':'none';
-  // Update cost panel for provider
+  // Update cost panel label for provider
   const lbl=document.getElementById('cost-sublabel');
-  if(lbl)lbl.textContent=p==='gemini'?'API calls today':'this session';
+  if(lbl)lbl.textContent='this session';
   const ptitle=document.getElementById('cost-panel-title');
-  if(ptitle)ptitle.textContent=p==='gemini'?'Session usage':'Session cost';
+  if(ptitle)ptitle.textContent='Session cost';
   // Update status bar hint if session hasn't started
   if(!S.currentRound){
     setStatus(p==='gemini'

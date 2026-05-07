@@ -8,7 +8,7 @@ The tool is built on the well-established multi-agent debate framework and is no
 
 ---
 
-> **Running Research Swarm costs less than you might expect.** The default provider is Google Gemini, which is free within Google AI Studio's daily quota. The recommended setup — [add a billing method to your Google AI Studio account](#gemini-billing-setup) — unlocks a generous free usage tier with no minimum spend. Most users will pay nothing. See [Gemini billing setup](#gemini-billing-setup) for the full picture before entering a credit card anywhere.
+> **Running Research Swarm is inexpensive.** The default provider is Google Gemini. A small session with 3–5 agents costs roughly $0.01–0.03; a full 10-agent detailed session around $0.20–0.40. The free tier (no billing required) works for initial testing but has a tight daily request limit. See [Gemini billing setup](#gemini-billing-setup) for the full picture.
 
 ---
 
@@ -415,19 +415,20 @@ Different call types use different models, selectable or fixed:
 | Synthesis | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | **Sonnet/Opus toggle** (Anthropic only) |
 | Meta-agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
 | Roster agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
-| Generation compression | Haiku 4.5 | 2.5 Flash | Fixed (simple summarisation) |
-| Mandate generation | Haiku 4.5 | 2.5 Flash | Fixed (simple drafting) |
+| Generation compression | Haiku 4.5 | **2.5 Flash Lite** | Fixed (simple summarisation) |
+| Mandate generation | Haiku 4.5 | **2.5 Flash Lite** | Fixed (simple drafting) |
 
 Approximate token prices per million:
 
 | Model | Input | Output | Cache write | Cache read |
 |---|---|---|---|---|
 | Gemini 2.5 Flash | $0.30 | $2.50 | — | — |
+| Gemini 2.5 Flash Lite | $0.10 | $0.40 | — | — |
 | Sonnet 4.6 | $3.00 | $15.00 | $3.75 | $0.30 |
 | Opus 4.6 | $15.00 | $75.00 | $18.75 | $1.50 |
 | Haiku 4.5 | $1.00 | $5.00 | $1.25 | $0.10 |
 
-Within Google AI Studio's free daily quota, Gemini calls cost nothing. The prices above apply if you exceed the quota or switch to a paid Google Cloud billing account.
+Gemini 2.5 Flash Lite is used for compression and mandate-rewriting tasks — the same "cheap model for cheap tasks" principle as Haiku on the Anthropic path. All generation, debate, synthesis, meta-agent, and roster calls use Gemini 2.5 Flash.
 
 The **Opus toggle** (Anthropic path only) applies to synthesis, meta-agent, and roster agent calls — the three calls where reasoning quality most directly affects the session's value. On Gemini, the toggle is greyed out; all roles use Gemini 2.5 Flash. Generation and debate remain on the strong model regardless of the toggle.
 
@@ -457,9 +458,7 @@ The free tier carries a data-use clause: Google may use inputs and outputs to im
 <a name="gemini-billing-setup"></a>
 #### Gemini billing setup — the recommended approach
 
-Adding a billing method to your Google AI Studio account is the single most effective way to use Research Swarm at no cost. Despite what "adding billing" sounds like, it **does not mean you will be charged**. Here is what actually happens:
-
-Enabling billing moves your project from the no-billing free tier to the **Pay-as-you-go tier**. Google provides a free monthly usage allowance to all projects with billing enabled. Research Swarm's usage at Gemini 2.5 Flash rates is small enough that the vast majority of users will remain within this allowance. For reference, a typical 10-agent detailed session costs roughly $0.02–0.10, and the monthly free credit comfortably covers hundreds of such sessions.
+Adding a billing method to your Google AI Studio account unlocks much higher rate limits. This is the recommended setup for regular use.
 
 **What enabling billing changes:**
 
@@ -468,8 +467,18 @@ Enabling billing moves your project from the no-billing free tier to the **Pay-a
 | Requests per minute (RPM) | 10 | 1,000 |
 | Requests per day (RPD) | 20–250 (varies by account) | 10,000 |
 | Tokens per minute (TPM) | 250,000 | 4,000,000 |
-| Minimum spend | $0 | $0 |
-| Monthly free credit | None | Included |
+| Minimum spend | $0 | $0 (pay only for what you use) |
+| Monthly free credit | None | None |
+
+**There is no free monthly credit on the pay-as-you-go tier** — you are charged from the first token once billing is enabled. However, costs are genuinely low:
+
+| Roster size | Depth | Typical session cost |
+|---|---|---|
+| 3–5 agents | brief | ~$0.01–0.03 |
+| 5–8 agents | detailed | ~$0.05–0.15 |
+| 10 agents | detailed, 5+ rounds | ~$0.20–0.40 |
+
+These costs are low enough that a $5/month budget covers extensive research use. Compression and mandate-rewriting tasks use Gemini 2.5 Flash Lite ($0.10/$0.40 per million tokens) rather than Flash ($0.30/$2.50), reducing costs for those calls by ~70%.
 
 **Practical session capacity by roster size:**
 
@@ -477,20 +486,21 @@ A full round (generation + debate + synthesis + meta-agent) makes approximately 
 
 | Roster size | Calls per full round | Rounds per day (no billing) | Rounds per day (billing enabled) |
 |---|---|---|---|
+| 3 agents | ~10 calls | ~2 | 1,000+ |
 | 5 agents | ~13 calls | ~1 | 700+ |
 | 8 agents | ~18 calls | ~1 | 500+ |
 | 10 agents | ~22 calls | 0–1 | 400+ |
 
-Without billing, the RPD limit (20–250 depending on your account age and region) is the binding constraint — a single 10-agent session can exhaust it. With billing enabled, the RPD limit is 10,000, which is effectively unlimited for research use.
+Without billing, the RPD limit is the binding constraint — a single 10-agent session can exhaust it. With billing enabled, the RPD limit is 10,000, which is effectively unlimited for research use.
 
 **How to set up billing:**
 
 1. Go to [aistudio.google.com](https://aistudio.google.com) and sign in
 2. Click the settings icon → **Billing** → **Enable billing** (or link an existing Google Cloud project with billing)
-3. Add a payment method — Google requires this to activate the tier, but will not charge it unless you exceed the free monthly credit
-4. To protect against unexpected charges, set a **monthly budget alert** (or a hard spending cap) in Google Cloud Console → Billing → Budgets & alerts. A cap of $1–5/month is a reasonable precaution for typical research use
+3. Add a payment method — you are billed at the end of each month for actual usage
+4. To guard against unexpected charges, set a **monthly budget alert** in Google Cloud Console → Billing → Budgets & alerts. A cap of $5–10/month is a practical ceiling for typical research use
 
-> **Can the spending cap be set to zero?** Google Cloud budget alerts can be set to notify you at $0 of spend, but a hard cap of exactly $0 is not supported — the minimum enforceable cap is $0.01. In practice this is not a concern: a 10-agent session costs approximately $0.02–0.10, so a $1 monthly cap gives you 10–50 full sessions before any charge is possible. You will receive an email alert long before approaching it.
+> **Can the spending cap be set to zero?** Google Cloud budget *alerts* can be set to notify you at $0 of spend, but a hard cap of exactly $0 is not supported — the minimum enforceable cap is $0.01. A $5/month cap with a $1 email alert is the recommended setup.
 
 ---
 
