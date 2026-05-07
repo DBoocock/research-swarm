@@ -303,7 +303,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
           oninput="S.apiKeys.gemini=this.value.trim()">
       </form>
       <div style="font-size:9px;color:var(--text3);margin-top:4px;line-height:1.4;">
-        Free at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent2);text-decoration:none;">aistudio.google.com</a>. Runs sequentially (free-tier RPM limit).
+        Free at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent2);text-decoration:none;">aistudio.google.com</a>. Enable billing in AI Studio for higher rate limits — see README.
       </div>
     </div>
 
@@ -728,8 +728,8 @@ function renderCost(){
   const isGemini=(S.provider||'gemini')==='gemini';
   const callCount=costS.callCount||0;
   if(isGemini){
-    // On Gemini free tier, show call count rather than dollar cost
-    // (dollar amounts are near-zero and misleading — what matters is RPD quota)
+    // On Gemini, show call count rather than dollar cost
+    // (dollar amounts are small; request count is what matters for quota tracking)
     document.getElementById('cost-total').textContent=callCount+' calls';
   } else {
     document.getElementById('cost-total').textContent='$'+costS.total.toFixed(4);
@@ -785,13 +785,13 @@ const resolveModel=modelFor;
 // API — provider abstraction
 // ══════════════════════════════════════════════════════════
 
-// Inter-call delays for Gemini free tier (sequential mode).
-// Free tier: 10 RPM (one request every 6s to stay safe), 20 RPD on restricted accounts.
+// Inter-call delays for Gemini sequential mode.
+// Billing-enabled accounts have 1,000 RPM — a 1s delay keeps calls orderly with negligible wait.
+// No-billing free tier has 10 RPM — set GEMINI_INTER_CALL_DELAY_MS=6000 manually if needed.
 // GEMINI_INTER_CALL_DELAY_MS: delay between agent calls within callParallel.
-// GEMINI_POST_BATCH_DELAY_MS: delay before non-agent calls (compression, synthesis, meta)
-//   that fire immediately after the last agent call completes.
-const GEMINI_INTER_CALL_DELAY_MS=6000;  // 6s between agent calls → ~10 RPM max
-const GEMINI_POST_BATCH_DELAY_MS=6000;  // 6s pause before compression/synthesis/meta
+// GEMINI_POST_BATCH_DELAY_MS: delay before post-batch calls (compression, synthesis, meta).
+const GEMINI_INTER_CALL_DELAY_MS=1000;  // 1s between agent calls — safe for billing-enabled (1000 RPM)
+const GEMINI_POST_BATCH_DELAY_MS=1000;  // 1s pause before compression/synthesis/meta
 
 // Helper: insert a post-batch delay on Gemini path before calling compression/synth/meta
 async function geminiDelay(){
@@ -1262,7 +1262,7 @@ async function runGen(){
 
     // Parallel calls: hit warm cache (Anthropic) or run sequentially with delay (Gemini free tier)
     if(allGenAgents.length > 1){
-      const providerNote=(S.provider||'gemini')==='gemini'?'sequentially (Gemini free tier)':'from cache';
+      const providerNote=(S.provider||'gemini')==='gemini'?'sequentially...':'from cache';
       setStatus(`Round ${S.currentRound} — ${allGenAgents.length - 1} agents running ${providerNote}...`);
       await callParallel(allGenAgents.slice(1).map(a=>()=>makeAgentCall(a)));
     }
@@ -1371,7 +1371,7 @@ async function runDebate(){
     setStatus(`Debate — pair 1/${debateEntries.length}...`);
     await makeDebateCall(debateEntries[0]);
     if(debateEntries.length > 1){
-      const providerNote=(S.provider||'gemini')==='gemini'?'sequentially (Gemini free tier)':'from cache';
+      const providerNote=(S.provider||'gemini')==='gemini'?'sequentially...':'from cache';
       setStatus(`Debate — ${debateEntries.length - 1} pairs running ${providerNote}...`);
       await callParallel(debateEntries.slice(1).map(e=>()=>makeDebateCall(e)));
     }
