@@ -1510,7 +1510,16 @@ async function compressGenerationOutputs(){
 // ══════════════════════════════════════════════════════════
 async function runMeta(synthesisText){
   const active=agents.filter(a=>S.agentStatuses[a.id]!=='retired'&&S.currentGen[a.id]);
-  if(active.length<2)return;
+  if(active.length<2){
+    // Clear stale proposals — if there are too few active agents to debate,
+    // the previous round's proposals must not persist into the next round.
+    // Leaving them in place causes the debate to re-run retired-agent pairs
+    // and the UI to re-show retirement proposals the user already accepted.
+    S.pairingProposals=[];
+    S.retirementProposals=[];
+    renderPairingsPanel();
+    return;
+  }
   const agentList=active.map(a=>`- ${a.name} (id: ${a.id}, status: ${S.agentStatuses[a.id]||'active'})`).join('\n');
   const metaPrompt=`You are a meta-agent directing a research swarm. Synthesis:
 
@@ -1555,7 +1564,15 @@ function parseMeta(text){
     if(agents.find(a=>a.id===id1)&&agents.find(a=>a.id===id2)&&id1!==id2)
       pairs.push({id1,id2,type:m[3].trim().toUpperCase(),reason:m[4].trim(),enabled:true});
   }
-  S.pairingProposals=pairs;
+  // Deduplicate by (id1,id2) — keep first occurrence of each directed pair.
+  // The meta-agent occasionally proposes the same pair with different types;
+  // both get parsed and create duplicate debate calls if not filtered here.
+  const seenPairs=new Set();
+  S.pairingProposals=pairs.filter(p=>{
+    const k=p.id1+'|'+p.id2;
+    if(seenPairs.has(k))return false;
+    seenPairs.add(k);return true;
+  });
   const recs=[];
   const statusMap={RETIRE:'retired',PROMOTE:'promoted',GENONLY:'genonly',ACTIVATE:'active'};
   for(const[kw,status]of Object.entries(statusMap)){

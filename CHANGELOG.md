@@ -1,5 +1,30 @@
 # Changelog
 
+## v4.4.3
+
+### Bug fixes — duplicate pair proposals and stale proposal persistence
+
+Two bugs identified from a 10-round session export.
+
+#### Bug 1 — Duplicate pair proposals within the same round
+
+The meta-agent occasionally proposes the same directed pair (A→B) multiple times with different debate types (e.g. CONTRADICTION and BRIDGE). `parseMeta()` inserted every matched `PAIR:` line without deduplication, so both appeared in `S.pairingProposals`. This caused the same pair to run as multiple separate debate calls in a single round, and inflated the pair count shown to the user. Visible in the session data as e.g. `bayesian_network` appearing 4 times in R6's proposals.
+
+Fix: `parseMeta()` now deduplicates by `(id1, id2)` key, keeping the first occurrence of each directed pair. Different debate types for the same pair are silently dropped after the first.
+
+#### Bug 2 — Stale pairing and retirement proposals persisting when all agents are retired
+
+When `runMeta()` exits early because fewer than two active agents remain (the `active.length < 2` guard), it previously returned without updating `S.pairingProposals` or `S.retirementProposals`. The previous round's proposals were left in place with their full state, including `accepted: true` on retirement entries. This caused two symptoms:
+
+1. **Debate re-ran retired-agent pairs.** `runDebate()` reads directly from `S.pairingProposals` — with stale proposals still present, it ran the same debate again between already-retired agents.
+2. **Retirement proposals reappeared.** `saveRound()` captures `S.retirementProposals` at save time — the stale accepted proposals were captured each round, making it appear the user needed to re-accept them.
+
+This is the same root mechanism as the loop fixed in v4.4.2, but triggered by the early-exit path in `runMeta` rather than by retired agents remaining in `S.currentGen`.
+
+Fix: when `runMeta` exits early due to insufficient active agents, both `S.pairingProposals` and `S.retirementProposals` are now cleared and `renderPairingsPanel()` is called to reflect the empty state in the UI.
+
+---
+
 ## v4.4.2
 
 ### Bug fixes — retired agent ghost outputs and pairing loop
