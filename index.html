@@ -287,7 +287,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
       <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;color:var(--text2);">
         <input type="radio" name="provider-radio" value="gemini" checked
           onchange="setProvider('gemini')" style="accent-color:var(--accent2);">
-        Gemini <span style="font-size:9px;color:var(--accent2);">free tier</span>
+        Gemini
       </label>
       <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;color:var(--text2);">
         <input type="radio" name="provider-radio" value="anthropic"
@@ -307,7 +307,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
           oninput="S.apiKeys.gemini=this.value.trim()">
       </form>
       <div style="font-size:9px;color:var(--text3);margin-top:4px;line-height:1.4;">
-        Free at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent2);text-decoration:none;">aistudio.google.com</a>. Enable billing in AI Studio for higher rate limits — see README.
+        Free at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent2);text-decoration:none;">aistudio.google.com</a>. Enable billing for pay-as-you-go pricing — see README.
       </div>
     </div>
 
@@ -330,7 +330,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
   <div class="cost-panel">
     <div class="cost-panel-hdr"><span id="cost-panel-title">Session cost</span><button onclick="resetCost()">reset</button></div>
     <div class="cost-total"><span class="cost-amount" id="cost-total">$0.0000</span><span class="cost-sublabel" id="cost-sublabel">this session</span></div>
-    <div id="rpd-warn" style="display:none;font-size:9px;color:var(--warn);line-height:1.4;margin-bottom:4px;"></div>
     <div class="cost-grid">
       <div class="cc"><span class="cc-label">Input tok</span><span class="cc-val" id="ci">0</span></div>
       <div class="cc"><span class="cc-label">Output tok</span><span class="cc-val" id="co">0</span></div>
@@ -359,7 +358,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
   </div>
 
   <div class="sidebar-section" id="synth-model-section">
-    <div class="ss-hdr"><span>Synthesis model</span><span id="synth-anthropic-only" style="display:none;font-size:9px;color:var(--text3);font-style:italic;">Anthropic only</span></div>
+    <div class="ss-hdr"><span>Synthesis model</span></div>
     <div class="depth-row">
       <button class="depth-btn active" id="synth-sonnet-btn" onclick="setSynthModel('sonnet',this)">sonnet</button>
       <button class="depth-btn" id="synth-opus-btn" onclick="setSynthModel('opus',this)">opus</button>
@@ -698,19 +697,19 @@ function buildCachedBlock(){
 }
 
 function agentSystemBlocks(mandate){
-  // cache_control on block[0] (the brief alone).
-  // The expanded brief is now ~2200+ tokens, safely above Sonnet 4.6's
-  // 2048-token minimum. Caching the brief alone (not the mandate) means
-  // all agents share the same single cache entry regardless of which
-  // agent is calling, maximising cache hit rate.
-  return[
-    {type:'text',text:buildCachedBlock(),cache_control:{type:'ephemeral'}},
-    {type:'text',text:'\n\nYOUR SPECIALIST MANDATE:\n'+mandate}
-  ];
+  // cache_control is Anthropic-only — Gemini has no prompt caching.
+  // Only attach the field on the Anthropic path; on Gemini omit it entirely
+  // rather than relying on GeminiProvider silently stripping it.
+  const isAnthropic=(S.provider||'gemini')==='anthropic';
+  const briefBlock={type:'text',text:buildCachedBlock(),
+    ...(isAnthropic&&{cache_control:{type:'ephemeral'}})};
+  return[briefBlock,{type:'text',text:'\n\nYOUR SPECIALIST MANDATE:\n'+mandate}];
 }
 
 function briefOnlyBlock(){
-  return[{type:'text',text:buildCachedBlock(),cache_control:{type:'ephemeral'}}];
+  const isAnthropic=(S.provider||'gemini')==='anthropic';
+  return[{type:'text',text:buildCachedBlock(),
+    ...(isAnthropic&&{cache_control:{type:'ephemeral'}})}];
 }
 
 // ══════════════════════════════════════════════════════════
@@ -746,9 +745,6 @@ function renderCost(){
   const pct=(!isGemini&&tot>0)?Math.round(costS.cr/tot*100):0;
   document.getElementById('cpct').textContent=isGemini?'n/a':pct+'%';
   document.getElementById('cbar').style.width=pct+'%';
-  // RPD warning: only relevant on no-billing free tier (very low RPD)
-  const rpdWarn=document.getElementById('rpd-warn');
-  if(rpdWarn)rpdWarn.style.display='none';
   document.getElementById('call-log').innerHTML=costS.calls.slice(0,8).map(c=>
     `<div class="cli"><span class="cli-name">${c.name}</span><span style="font-size:9px;color:var(--text3);margin-left:3px">${c.mlbl||''}</span><span class="cli-cost">$${c.cost.toFixed(4)}</span>${c.hit?`<span class="cli-cache">⚡${c.cr.toLocaleString()}</span>`:''}</div>`
   ).join('');
@@ -780,20 +776,6 @@ const resolveModel=modelFor;
 // ══════════════════════════════════════════════════════════
 // API — provider abstraction
 // ══════════════════════════════════════════════════════════
-
-// Inter-call delays for Gemini sequential mode.
-// Billing-enabled accounts have 1,000 RPM — a 1s delay keeps calls orderly with negligible wait.
-// No-billing free tier has 10 RPM — set GEMINI_INTER_CALL_DELAY_MS=6000 manually if needed.
-// GEMINI_INTER_CALL_DELAY_MS: delay between agent calls within callParallel.
-// GEMINI_POST_BATCH_DELAY_MS: delay before post-batch calls (compression, synthesis, meta).
-const GEMINI_INTER_CALL_DELAY_MS=1000;  // 1s between agent calls — safe for billing-enabled (1000 RPM)
-const GEMINI_POST_BATCH_DELAY_MS=1000;  // 1s pause before compression/synthesis/meta
-
-// Helper: insert a post-batch delay on Gemini path before calling compression/synth/meta
-async function geminiDelay(){
-  if((S.provider||'gemini')==='gemini')
-    await new Promise(r=>setTimeout(r,GEMINI_POST_BATCH_DELAY_MS));
-}
 
 // ── Anthropic provider ──────────────────────────────────
 const AnthropicProvider={
@@ -836,9 +818,8 @@ const AnthropicProvider={
 };
 
 // ── Gemini provider ─────────────────────────────────────
-// No prompt caching on this path — Gemini caching has different mechanics
-// and is not implemented in this version. See CONTRIBUTING.md.
-// Streaming uses SSE but with a different chunk format to Anthropic.
+// Streaming uses SSE with a different chunk format to Anthropic.
+// No prompt caching — cache_control fields are not sent on this path.
 const GeminiProvider={
   async call({name,role,systemBlocks,systemString,messages,onChunk,signal}){
     const key=S.apiKeys.gemini||document.getElementById('api-key-gemini').value.trim();
@@ -880,7 +861,7 @@ const GeminiProvider={
     if(!body.system_instruction)delete body.system_instruction;
 
     const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`;
-    // Retry on 429 with exponential backoff — free tier RPM bursts can cause transient errors
+    // Retry on 429 with exponential backoff — transient quota bursts on billing-enabled accounts
     let resp,lastErr;
     for(let attempt=0;attempt<3;attempt++){
       if(attempt>0){
@@ -934,8 +915,8 @@ const providerImpls={anthropic:AnthropicProvider,gemini:GeminiProvider};
 
 // ── Unified entry point — all call sites use this ───────
 // Signature is identical to the old apiStream(); callers need no changes.
-// On the Anthropic path, systemBlocks with cache_control are passed through intact.
-// On the Gemini path, cache_control fields are stripped during message conversion.
+// Unified entry point — all call sites use this. Provider-specific logic
+// lives entirely in AnthropicProvider and GeminiProvider.
 async function apiStream(args){
   const impl=providerImpls[S.provider||'gemini'];
   if(!impl)throw new Error(`Unknown provider: ${S.provider}`);
@@ -943,17 +924,16 @@ async function apiStream(args){
 }
 
 // ── Parallel helper ─────────────────────────────────────
-// On Anthropic: true parallel (Promise.all) — exploits prompt cache after primer completes.
-// On Gemini: sequential with inter-call delay — respects free-tier RPM limits.
-// Usage: await callParallel(arrayOfAsyncFns)  where each fn returns a Promise.
+// On Anthropic: run fns[0] alone first (writes the prompt cache), then
+// run fns[1..n] in true parallel (all hit the warm cache).
+// On Gemini (and any future provider): fire all calls in true parallel —
+// no caching, no primer needed, no inter-call delays.
 async function callParallel(fns){
-  if((S.provider||'gemini')==='gemini'){
-    const results=[];
-    for(let i=0;i<fns.length;i++){
-      results.push(await fns[i]());
-      if(i<fns.length-1)await new Promise(r=>setTimeout(r,GEMINI_INTER_CALL_DELAY_MS));
-    }
-    return results;
+  if(!fns.length)return[];
+  if((S.provider||'gemini')==='anthropic'){
+    const first=await fns[0]();
+    const rest=await Promise.all(fns.slice(1).map(f=>f()));
+    return[first,...rest];
   }
   return Promise.all(fns.map(f=>f()));
 }
@@ -1002,10 +982,8 @@ function setProvider(p){
   document.getElementById('key-section-gemini').style.display=p==='gemini'?'':'none';
   document.getElementById('key-section-anthropic').style.display=p==='anthropic'?'':'none';
   // Grey out synthesis model toggle on Gemini (it has no effect there)
-  const synthBtns=document.querySelectorAll('#synth-sonnet-btn,#synth-opus-btn');
-  const synthNote=document.getElementById('synth-anthropic-only');
-  synthBtns.forEach(b=>b.disabled=p==='gemini');
-  if(synthNote)synthNote.style.display=p==='gemini'?'':'none';
+  const synthSection=document.getElementById('synth-model-section');
+  if(synthSection)synthSection.style.display=p==='gemini'?'none':'';
   // Update cost panel label for provider
   const lbl=document.getElementById('cost-sublabel');
   if(lbl)lbl.textContent='this session';
@@ -1014,7 +992,7 @@ function setProvider(p){
   // Update status bar hint if session hasn't started
   if(!S.currentRound){
     setStatus(p==='gemini'
-      ?'Ready. Add a Gemini API key to begin (free).'
+      ?'Ready. Add a Gemini API key to begin.'
       :'Ready. Add your Anthropic API key to begin.');
   }
 }
@@ -1233,11 +1211,9 @@ async function runGen(){
     bodyEls[agent.id].innerHTML='<span class="cursor"></span>';
   });
   try{
-    // Caching strategy: the shared brief block must be written to cache before
-    // parallel calls can read it. Cache entries are only available after the
-    // first response *begins* streaming — concurrent calls cannot hit a cache
-    // written in the same batch. Fix: run agent[0] alone first (writes cache),
-    // then fire agents[1..n] in parallel (all hit the warm cache).
+    // callParallel handles all provider-specific execution strategy:
+    // Anthropic runs agent[0] alone first to write the prompt cache, then
+    // the rest in parallel. Gemini fires all agents in parallel immediately.
     const makeAgentCall = agent =>
       apiStream({
         name:agent.name.slice(0,22),
@@ -1262,19 +1238,13 @@ async function runGen(){
         }
       });
 
-    // Primer call: writes the cache
-    setStatus(`Round ${S.currentRound} — writing cache (agent 1/${allGenAgents.length})...`);
-    await makeAgentCall(allGenAgents[0]);
-
-    // Parallel calls: hit warm cache (Anthropic) or run sequentially with delay (Gemini free tier)
-    if(allGenAgents.length > 1){
-      const providerNote=(S.provider||'gemini')==='gemini'?'sequentially...':'from cache';
-      setStatus(`Round ${S.currentRound} — ${allGenAgents.length - 1} agents running ${providerNote}...`);
-      await callParallel(allGenAgents.slice(1).map(a=>()=>makeAgentCall(a)));
-    }
+    // callParallel handles provider differences:
+    // Anthropic — runs agent[0] alone first (writes prompt cache), then remaining agents in parallel.
+    // Gemini — fires all agents in true parallel immediately, no primer needed.
+    setStatus(`Round ${S.currentRound} — ${allGenAgents.length} agent${allGenAgents.length>1?'s':''} running...`);
+    await callParallel(allGenAgents.map(a=>()=>makeAgentCall(a)));
     updateRoundHdr(hdr,'done');tc('gen',allGenAgents.length);
-    setStatus('Generation complete.' + ((S.provider||'gemini')==='gemini'?' Pausing before synthesis (rate limit)...':' Compressing outputs for synthesis...'));
-    await geminiDelay();
+    setStatus('Generation complete. Running synthesis...');
     await runSynthesis(false);
   }catch(e){if(e.name!=='AbortError'){setStatus('Error: '+e.message);updateRoundHdr(hdr,'error');}}
   S.running=false;unlockTabs();document.getElementById('run-btn').disabled=false;
@@ -1374,17 +1344,11 @@ async function runDebate(){
       });
     };
 
-    // Primer call first, then remaining debate calls (parallel on Anthropic, sequential on Gemini)
-    setStatus(`Debate — pair 1/${debateEntries.length}...`);
-    await makeDebateCall(debateEntries[0]);
-    if(debateEntries.length > 1){
-      const providerNote=(S.provider||'gemini')==='gemini'?'sequentially...':'from cache';
-      setStatus(`Debate — ${debateEntries.length - 1} pairs running ${providerNote}...`);
-      await callParallel(debateEntries.slice(1).map(e=>()=>makeDebateCall(e)));
-    }
+    // callParallel handles provider differences (same as runGen).
+    setStatus(`Debate — ${debateEntries.length} pair${debateEntries.length>1?'s':''} running...`);
+    await callParallel(debateEntries.map(e=>()=>makeDebateCall(e)));
     updateRoundHdr(hdr,'done');tc('deb',activePairs.length);
-    setStatus('Debate complete.' + ((S.provider||'gemini')==='gemini'?' Pausing before synthesis (rate limit)...':' Running synthesis...'));
-    await geminiDelay();
+    setStatus('Debate complete. Running synthesis...');
     await runSynthesis(true);
   }catch(e){if(e.name!=='AbortError')setStatus('Debate error: '+e.message);}
   S.running=false;unlockTabs();document.getElementById('run-btn').disabled=false;
@@ -1476,7 +1440,6 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     updateRoundHdr(hdr,'done');tc('syn',1);
     setStatus('Synthesis complete. Running meta-agent...');
     parseSynthesis(result);
-    await geminiDelay();
     await runMeta(result);
     saveRound(includeDebate);
     autoExportJson();
@@ -2283,6 +2246,7 @@ function makeNotice(text){const d=document.createElement('div');d.className='not
 // ══════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════
+setProvider(S.provider||'gemini'); // apply initial UI state (hides synth model section for Gemini default)
 renderAgentList();
 renderCost();
 updateOverlapMatrix();
