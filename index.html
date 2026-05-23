@@ -110,6 +110,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 .tab{font-family:var(--mono);font-size:11px;padding:8px 10px;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .1s;background:none;border-top:none;border-left:none;border-right:none;letter-spacing:.03em;white-space:nowrap;}
 .tab:hover{color:var(--text2);}
 .tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tabs-locked .tab:not(.active){opacity:.4;cursor:not-allowed;pointer-events:none;}
+.launch-btn:disabled{opacity:.35;cursor:not-allowed;}
 .tab-count{display:inline-block;background:var(--bg4);color:var(--text3);font-size:9px;padding:1px 4px;border-radius:10px;margin-left:3px;}
 .tab.active .tab-count{background:rgba(200,185,122,.15);color:var(--accent);}
 .panel{display:none;flex:1;overflow-y:auto;padding:12px;flex-direction:column;gap:8px;}
@@ -130,6 +132,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 .badge{font-size:9px;padding:1px 5px;border-radius:10px;letter-spacing:.04em;}
 .b-run{background:rgba(122,158,200,.15);color:var(--accent3);}
 .b-done{background:rgba(122,200,136,.12);color:var(--success);}
+.b-err{background:rgba(200,100,80,.15);color:var(--danger);}
 .b-pend{background:var(--bg4);color:var(--text3);}
 .b-deb{background:rgba(200,160,122,.15);color:var(--warn);}
 .rcard-cost{font-size:10px;color:var(--text3);margin-left:3px;}
@@ -218,6 +221,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 /* Modals */
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;display:flex;align-items:center;justify-content:center;}
 .modal-bg.hidden{display:none;}
+#agent-modal{z-index:200;}
 .modal{background:var(--bg2);border:1px solid var(--border2);border-radius:6px;display:flex;flex-direction:column;overflow:hidden;max-height:90vh;}
 .modal-lg{width:800px;max-width:96vw;}
 .modal-md{width:560px;max-width:96vw;}
@@ -513,6 +517,9 @@ function priceFor(model){return PRICING[model]||PRICING['claude-sonnet-4-6'];}
 const COLOURS=['#7ac8c8','#c87ac8','#c8a07a','#7a9fc8','#a07ac8','#7ac87a',
   '#c8c87a','#c87a7a','#7ac8a0','#c8b97a','#7ab8c8','#c87aa0',
   '#a8c87a','#c8907a','#7a7ac8','#c8c8a0'];
+// Stores mandate update payloads keyed by integer index so onclick attributes
+// only pass a safe integer — avoids encoding bugs with special chars in LLM text.
+const pendingMandateUpdates = new Map();
 
 // ══════════════════════════════════════════════════════════
 // DEFAULT BRIEF
@@ -1016,7 +1023,11 @@ function setSynthModel(m,btn){
   document.getElementById('synth-sonnet-btn').classList.toggle('active',m==='sonnet');
   document.getElementById('synth-opus-btn').classList.toggle('active',m==='opus');
 }
+function lockTabs(){document.querySelector('.tab-bar').classList.add('tabs-locked');}
+function unlockTabs(){document.querySelector('.tab-bar').classList.remove('tabs-locked');}
 function switchTab(name){
+  // Allow programmatic switches (from running code) always;
+  // user-initiated clicks are blocked by .tabs-locked CSS pointer-events.
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('panel-'+name).classList.add('active');
@@ -1093,7 +1104,11 @@ function openNewAgentModal(){
   document.getElementById('agent-modal').classList.remove('hidden');
 }
 
-function closeAgentModal(){document.getElementById('agent-modal').classList.add('hidden');S.editingAgentId=null;}
+function closeAgentModal(){document.getElementById('agent-modal').classList.add('hidden');S.editingAgentId=null;S._onAgentSave=null;}
+
+// Callback invoked by saveAgent() after a successful save — used by editMandateManually()
+// to refresh the roster card preview without closing the roster modal.
+let _onAgentSaveCallback=null;
 
 function saveAgent(){
   const name=document.getElementById('edit-agent-name').value.trim();
@@ -1110,7 +1125,9 @@ function saveAgent(){
     S.selectedAgents.add(id);
   }
   renderAgentList();
+  const cb=_onAgentSaveCallback;_onAgentSaveCallback=null;
   closeAgentModal();
+  if(cb)cb();
 }
 
 function deleteCurrentAgent(){
@@ -1189,7 +1206,7 @@ async function runGen(){
   }
 
   const runningAll = allGenAgents.length === allCandidates.length;
-  S.running=true;
+  S.running=true;lockTabs();
   if(isFirstRound) S.currentRound++;
   // Don't clear S.currentGen — preserve existing outputs for agents not in this run
   if(isFirstRound){ S.currentGen={}; S.currentDebate={}; }
@@ -1260,7 +1277,8 @@ async function runGen(){
     await geminiDelay();
     await runSynthesis(false);
   }catch(e){if(e.name!=='AbortError'){setStatus('Error: '+e.message);updateRoundHdr(hdr,'error');}}
-  S.running=false;document.getElementById('run-btn').disabled=false;
+  S.running=false;unlockTabs();document.getElementById('run-btn').disabled=false;
+  renderPairingsPanel(); // re-render now that S.running=false so launch button is enabled
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1270,7 +1288,7 @@ async function runDebate(){
   if(S.running)return;
   const activePairs=S.pairingProposals.filter(p=>p.enabled);
   if(!activePairs.length){setStatus('No pairs enabled.');return;}
-  S.running=true;S.currentDebate={};
+  S.running=true;lockTabs();S.currentDebate={};
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-deb');panel.innerHTML='';
   const hdr=makeRoundHdr(`Round ${S.currentRound} — Debate`,'running');
@@ -1369,7 +1387,8 @@ async function runDebate(){
     await geminiDelay();
     await runSynthesis(true);
   }catch(e){if(e.name!=='AbortError')setStatus('Debate error: '+e.message);}
-  S.running=false;document.getElementById('run-btn').disabled=false;
+  S.running=false;unlockTabs();document.getElementById('run-btn').disabled=false;
+  renderPairingsPanel(); // re-render now that S.running=false so launch button is enabled
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1379,32 +1398,43 @@ async function runSynthesis(includeDebate){
   const panel=document.getElementById('panel-syn');panel.innerHTML='';
   const hdr=makeRoundHdr('Synthesis','running');panel.appendChild(hdr);switchTab('syn');
 
+  // Append the synthesis card IMMEDIATELY — before any async work — so syn-body
+  // exists in the DOM throughout. Previously sc was appended after compressGenerationOutputs(),
+  // meaning a compression error left the panel empty with no visible feedback and tabs
+  // unlocked as soon as runDebate's finally block ran.
+  S.currentSynthesis='';
+  const synthModelLabel=S.synthesisModel==='opus'?'opus':'sonnet';
+  const sc=document.createElement('div');sc.className='synth-card';
+  sc.innerHTML=`<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-run">running</span><span style="font-size:9px;color:var(--text3);margin-left:6px;">${synthModelLabel}</span></div><div class="rcard-body" id="syn-body"><span class="cursor"></span></div>`;
+  panel.appendChild(sc);
+
   let allOutputs='';
 
-  if(includeDebate){
-    // Two-stage: summarise generation outputs first (cheap), then synthesise with full debate outputs
-    // This keeps synthesis input size bounded regardless of round count
-    setStatus('Compressing generation outputs for synthesis...');
-    const genSummaries=await compressGenerationOutputs();
-    genSummaries.forEach(({name,summary})=>{allOutputs+=`\n\n=== ${name.toUpperCase()} (generation summary) ===\n${summary}`;});
-    Object.entries(S.currentDebate).forEach(([key,text])=>{
-      const[id1,id2]=key.split('_');
-      const n1=agents.find(a=>a.id===id1)?.name||id1;
-      const n2=agents.find(a=>a.id===id2)?.name||id2;
-      allOutputs+=`\n\n=== DEBATE: ${n1.toUpperCase()} → ${n2.toUpperCase()} ===\n${text}`;
-    });
-  } else {
-    // Post-generation: use full outputs — first synthesis of the round
-    // Exclude retired agents whose outputs persist in S.currentGen
-    Object.entries(S.currentGen)
-      .filter(([id])=>S.agentStatuses[id]!=='retired')
-      .forEach(([id,text])=>{
-        const agent=agents.find(a=>a.id===id);
-        allOutputs+=`\n\n=== ${agent?agent.name.toUpperCase():id} ===\n${text}`;
+  try{
+    if(includeDebate){
+      // Two-stage: summarise generation outputs first (cheap), then synthesise with full debate outputs
+      // This keeps synthesis input size bounded regardless of round count
+      setStatus('Compressing generation outputs for synthesis...');
+      const genSummaries=await compressGenerationOutputs();
+      genSummaries.forEach(({name,summary})=>{allOutputs+=`\n\n=== ${name.toUpperCase()} (generation summary) ===\n${summary}`;});
+      Object.entries(S.currentDebate).forEach(([key,text])=>{
+        const[id1,id2]=key.split('_');
+        const n1=agents.find(a=>a.id===id1)?.name||id1;
+        const n2=agents.find(a=>a.id===id2)?.name||id2;
+        allOutputs+=`\n\n=== DEBATE: ${n1.toUpperCase()} → ${n2.toUpperCase()} ===\n${text}`;
       });
-  }
+    } else {
+      // Post-generation: use full outputs — first synthesis of the round
+      // Exclude retired agents whose outputs persist in S.currentGen
+      Object.entries(S.currentGen)
+        .filter(([id])=>S.agentStatuses[id]!=='retired')
+        .forEach(([id,text])=>{
+          const agent=agents.find(a=>a.id===id);
+          allOutputs+=`\n\n=== ${agent?agent.name.toUpperCase():id} ===\n${text}`;
+        });
+    }
 
-  const synthPrompt=`You have received outputs from a multi-agent theoretical research swarm. All outputs:\n${allOutputs}
+    const synthPrompt=`You have received outputs from a multi-agent theoretical research swarm. All outputs:\n${allOutputs}
 
 Write a concise synthesis using these exact sections. Keep strictly to the word limits — do not pad.
 
@@ -1427,14 +1457,7 @@ CONTRADICTIONS (one per line, exact format):
 AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resolution needed: [method in ≤15 words]
 (2-3 contradictions)`;
 
-  S.currentSynthesis='';
-  const synthModelLabel=S.synthesisModel==='opus'?'opus':'sonnet';
-  const sc=document.createElement('div');sc.className='synth-card';
-  sc.innerHTML=`<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-run">running</span><span style="font-size:9px;color:var(--text3);margin-left:6px;">${synthModelLabel}</span></div><div class="rcard-body" id="syn-body"><span class="cursor"></span></div>`;
-  panel.appendChild(sc);
-  setStatus('Running synthesis...');
-
-  try{
+    setStatus('Running synthesis...');
     const result=await apiStream({
       name:'synthesis',
       role:'synthesis',
@@ -1458,7 +1481,16 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     saveRound(includeDebate);
     autoExportJson();
     autoExportMd();
-  }catch(e){if(e.name!=='AbortError')setStatus('Synthesis error: '+e.message);}
+  }catch(e){
+    if(e.name==='AbortError')return;
+    // Show the error inside the synthesis panel so the user knows what happened,
+    // rather than leaving a blank "running" card with no explanation.
+    const synBody=document.getElementById('syn-body');
+    if(synBody)synBody.innerHTML=`<span style="color:var(--danger)">Synthesis error: ${e.message}</span>`;
+    sc.querySelector('.badge').className='badge b-err';sc.querySelector('.badge').textContent='error';
+    updateRoundHdr(hdr,'error');
+    setStatus('Synthesis error: '+e.message);
+  }
 }
 
 // Compress generation outputs to ~80 words each in a single batched call
@@ -1680,15 +1712,20 @@ function renderRosterResults(raw){
   const mandateUpdates=[...raw.matchAll(/MANDATE UPDATE:\s*([^\|]+)\|\s*([^\|]+)\|\s*([^\n]+)/g)];
   if(mandateUpdates.length){
     const lbl=document.createElement('div');lbl.className='sec-label';lbl.style.marginTop='10px';lbl.textContent='Mandate drift corrections';results.appendChild(lbl);
-    mandateUpdates.forEach(m=>{
+    // Clear stale entries from a previous roster run
+    pendingMandateUpdates.clear();
+    mandateUpdates.forEach((m,idx)=>{
       const id=m[1].trim(),issue=m[2].trim(),suggestion=m[3].trim();
       const agent=agents.find(a=>a.id===id);if(!agent)return;
+      // Store payload by index — avoids encoding bugs with special chars in LLM text
+      pendingMandateUpdates.set(idx,{id,issue,suggestion});
       const div=document.createElement('div');div.style.cssText='background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 10px;margin-bottom:4px;';
+      const previewId=`mandate-preview-${idx}`;
       div.innerHTML=`<div style="font-size:11px;color:var(--text2);margin-bottom:3px;"><strong>${agent.name}</strong>: ${issue}</div>
-        <div style="font-size:11px;color:var(--text3);font-style:italic;margin-bottom:6px;">${suggestion}</div>
+        <div class="rs-mandate-preview" id="${previewId}" style="font-size:11px;color:var(--text3);font-style:italic;margin-bottom:6px;">${suggestion}</div>
         <div style="display:flex;gap:6px;">
-          <button class="mbtn mbtn-p" style="font-size:10px;padding:4px 10px;" onclick="autoApplyMandate('${id}','${encodeURIComponent(issue)}','${encodeURIComponent(suggestion)}',this)">✦ apply correction</button>
-          <button class="sm-btn" onclick="openAgentModal('${id}')">edit manually</button>
+          <button class="mbtn mbtn-p" style="font-size:10px;padding:4px 10px;" onclick="autoApplyMandate(${idx},this)">✦ apply correction</button>
+          <button class="sm-btn" onclick="editMandateManually(${idx})">edit manually</button>
         </div>
         <div class="mandate-apply-status" style="font-size:10px;color:var(--text3);margin-top:5px;display:none;"></div>`;
       results.appendChild(div);
@@ -1731,11 +1768,37 @@ function applyStatusChange(id,newStatus,btn){
   renderAgentList();btn.textContent='applied ✓';btn.disabled=true;
 }
 
-async function autoApplyMandate(id, issueEnc, suggestionEnc, btn){
+// Opens the agent editor from within the roster modal.
+// The agent-modal has z-index:200 so it appears on top of the roster (z-index:100).
+// On save, refreshes the roster card's mandate preview so the change is visible
+// when the user closes the agent editor and returns to the roster.
+function editMandateManually(idx){
+  const entry=pendingMandateUpdates.get(idx);
+  if(!entry)return;
+  const {id}=entry;
+  // Register a callback: after saveAgent() fires, update the roster card preview
+  _onAgentSaveCallback=()=>{
+    const agent=agents.find(a=>a.id===id);
+    if(!agent)return;
+    const previewEl=document.getElementById(`mandate-preview-${idx}`);
+    if(previewEl){
+      previewEl.textContent=agent.mandate.slice(0,180)+'...';
+      previewEl.style.fontStyle='normal';
+      previewEl.style.color='var(--text2)';
+    }
+    // Mark the apply button as already actioned
+    const applyBtns=document.querySelectorAll(`#roster-results .mbtn-p`);
+    // (can't easily select by idx here; the preview change is sufficient feedback)
+  };
+  openAgentModal(id);
+}
+
+async function autoApplyMandate(idx, btn){
+  const entry=pendingMandateUpdates.get(idx);
+  if(!entry){setStatus('Mandate update entry not found — re-run roster agent.');return;}
+  const {id,issue,suggestion}=entry;
   const agent=agents.find(a=>a.id===id);
-  if(!agent)return;
-  const issue=decodeURIComponent(issueEnc);
-  const suggestion=decodeURIComponent(suggestionEnc);
+  if(!agent){setStatus('Agent not found: '+id);return;}
   btn.disabled=true;btn.textContent='rewriting...';
   const statusEl=btn.closest('div').querySelector('.mandate-apply-status');
   if(statusEl){statusEl.style.display='block';statusEl.textContent='Calling Haiku to rewrite mandate...';}
@@ -1764,8 +1827,12 @@ Write only the revised mandate text. Do not include any preamble, explanation, o
     });
     agent.mandate=result.trim();
     btn.textContent='applied ✓';
+    // Update the preview using the stable previewId
+    const previewEl=document.getElementById(`mandate-preview-${idx}`);
+    if(previewEl){previewEl.textContent=result.trim().slice(0,180)+'...';previewEl.style.fontStyle='normal';previewEl.style.color='var(--text2)';}
     if(statusEl){
-      statusEl.textContent=`Mandate updated (${result.trim().split(/\s+/).length} words). Review in the agent editor if needed.`;
+      statusEl.style.display='block';
+      statusEl.textContent=`✓ Mandate updated (${result.trim().split(/\s+/).length} words). Review in agent editor if needed.`;
       statusEl.style.color='var(--success)';
     }
     setStatus(`Mandate for ${agent.name} updated by roster agent correction.`);
@@ -1784,40 +1851,6 @@ function renderPairingsPanel(){
   if(!S.pairingProposals.length){panel.innerHTML='<div class="empty-state"><span class="big">No proposals yet</span>Run generation and synthesis first.</div>';return;}
   panel.appendChild(makeSectionLabel(`Proposed debate pairings — round ${S.currentRound+1}`));
   panel.appendChild(makeNotice('Agents may have multiple pairings — shown as N↔ in the sidebar. Toggle pairs on/off, then launch the debate round.'));
-
-  // Show previous round's pairings for comparison — makes accidental repetition
-  // immediately visible and confirms the meta-agent proposals were applied correctly.
-  const lastRoundWithDebate = [...S.rounds].reverse().find(r => Object.keys(r.debateOutputs||{}).length > 0);
-  if(lastRoundWithDebate && lastRoundWithDebate.pairingProposals && lastRoundWithDebate.pairingProposals.length){
-    const prevWrap=document.createElement('div');prevWrap.className='pair-panel';prevWrap.style.opacity='0.55';prevWrap.style.marginBottom='10px';
-    const prevHdr=document.createElement('div');prevHdr.className='pair-panel-hdr';
-    prevHdr.innerHTML=`<span style="font-family:var(--serif);font-style:italic;font-size:13px;color:var(--text2);flex:1">Previous round pairings (round ${lastRoundWithDebate.round})</span>`;
-    prevWrap.appendChild(prevHdr);
-    const prevList=document.createElement('div');prevList.className='pair-list';
-    // Compute set of new proposal keys to highlight repeated pairs
-    const newPairKeys=new Set(S.pairingProposals.map(p=>p.id1+'|'+p.id2));
-    lastRoundWithDebate.pairingProposals.forEach(pair=>{
-      const a1=agents.find(a=>a.id===pair.id1),a2=agents.find(a=>a.id===pair.id2);
-      const typeClass={'CONTRADICTION':'pt-c','INTERSECTION':'pt-i','DISRUPTION':'pt-d','BRIDGE':'pt-b'}[pair.type]||'pt-b';
-      const isRepeated=newPairKeys.has(pair.id1+'|'+pair.id2);
-      const item=document.createElement('div');item.className='pair-item on';item.style.cursor='default';
-      if(isRepeated) item.style.outline='1px solid rgba(200,100,80,.5)';
-      item.innerHTML=`<div class="ptoggle on" style="pointer-events:none;opacity:0.4">✓</div>
-        <div style="flex:1">
-          <div class="pair-agents">
-            <span class="pat" style="background:${a1?.color}22;color:${a1?.color}">${a1?.name||pair.id1}</span>
-            <span style="color:var(--text3);font-size:11px">→</span>
-            <span class="pat" style="background:${a2?.color}22;color:${a2?.color}">${a2?.name||pair.id2}</span>
-            <span class="ptb ${typeClass}">${pair.type}</span>
-            ${isRepeated?'<span style="font-size:10px;color:rgba(200,100,80,.9);margin-left:4px">repeated</span>':''}
-          </div>
-        </div>`;
-      prevList.appendChild(item);
-    });
-    prevWrap.appendChild(prevList);
-    panel.appendChild(prevWrap);
-  }
-
   const wrap=document.createElement('div');wrap.className='pair-panel';
   const ph=document.createElement('div');ph.className='pair-panel-hdr';
   ph.innerHTML=`<span style="font-family:var(--serif);font-style:italic;font-size:14px;color:var(--text);flex:1">Debate pair proposals</span><span class="badge b-deb">${S.pairingProposals.filter(p=>p.enabled).length} active</span>`;
@@ -1856,6 +1889,7 @@ function renderPairingsPanel(){
   }
   panel.appendChild(wrap);
   const btn=document.createElement('button');btn.className='launch-btn';btn.textContent='launch debate round →';btn.onclick=runDebate;
+  if(S.running)btn.disabled=true;
   panel.appendChild(btn);
   tc('pair',S.pairingProposals.filter(p=>p.enabled).length);
 }
@@ -2017,23 +2051,15 @@ function renderOverlapMatrix(){
 // ══════════════════════════════════════════════════════════
 // SESSION LOG + EXPORT
 // ══════════════════════════════════════════════════════════
-function saveRound(includeDebate){
+function saveRound(){
   // Use S.rounds.length+1 as the sequence number so each saved record gets a
   // unique incrementing label regardless of how many synthesis calls happen
   // per generation round (generation synthesis + debate synthesis both call
   // saveRound with the same S.currentRound value, causing duplicate labels).
-  //
-  // includeDebate: only save S.currentDebate when a debate actually ran this
-  // synthesis cycle. When called after a post-generation synthesis (including
-  // the mid-session new-agent path), S.currentDebate still holds the previous
-  // round's debate outputs — saving them would corrupt the export and make the
-  // log appear to show stale/repeated debate pairs. Pass false (or omit) for
-  // post-generation saves; pass true only from runSynthesis(true) (post-debate).
   const seqNum = S.rounds.length + 1;
   S.rounds.push({
     round:seqNum,ts:new Date().toISOString(),depth:S.depth,
-    generationOutputs:{...S.currentGen},
-    debateOutputs:includeDebate ? {...S.currentDebate} : {},
+    generationOutputs:{...S.currentGen},debateOutputs:{...S.currentDebate},
     synthesis:S.currentSynthesis,pairingProposals:[...S.pairingProposals],
     retirementProposals:[...S.retirementProposals]
   });
