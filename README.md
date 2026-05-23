@@ -8,7 +8,7 @@ The tool is built on the well-established multi-agent debate framework and is no
 
 ---
 
-> **Running Research Swarm is inexpensive.** The default provider is Google Gemini. A small session with 3–5 agents costs roughly $0.01–0.03; a full 10-agent detailed session around $0.20–0.40. The free tier (no billing required) works for initial testing but has a tight daily request limit. See [Gemini billing setup](#gemini-billing-setup) for the full picture.
+> **Running Research Swarm is inexpensive.** The default provider is Google Gemini with billing enabled. A small session with 3–5 agents costs roughly $0.01–0.03; a full 10-agent detailed session around $0.20–0.40. The free tier (no billing required) works for initial exploration but has a tight daily request limit. See [Gemini billing setup](#gemini-billing-setup) for the full picture.
 
 ---
 
@@ -96,7 +96,7 @@ The swarm operates as an iterative loop of generation, debate, and synthesis rou
            └──────────────────────────────────────────┘
 ```
 
-**Generation round**: Selected agents receive the shared research brief plus their individual specialist mandate. On the first round all selected agents run; on subsequent rounds only newly added agents run — existing generation outputs are preserved. Agents run in primer-then-parallel order (the first agent alone to write the cache, then the rest in parallel reading from it).
+**Generation round**: Selected agents receive the shared research brief plus their individual specialist mandate. On the first round all selected agents run; on subsequent rounds only newly added agents run — existing generation outputs are preserved. On the Anthropic path, agents run in primer-then-parallel order (the first agent alone to write the prompt cache, then the rest in parallel reading from it). On Gemini, all agents run in true parallel with no sequencing overhead.
 
 **Debate round**: Agents are assigned one or more partners whose generation output they read and respond to. Multiple pairings per agent are allowed and encouraged. Debates are batched: an agent with three partners makes one API call rather than three, with responses labelled per partner. Pairings are proposed by the meta-agent after each synthesis and reviewed by you before the debate launches.
 
@@ -135,20 +135,20 @@ This cycle repeats. Research directions, contradictions, and matrix entries accu
    Or drag the file into your browser window.
 
 3. Select your API provider in the sidebar and enter the corresponding key:
-   - **Google Gemini** (default, free): get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+   - **Google Gemini** (default): get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
    - **Anthropic**: get a key at [console.anthropic.com](https://console.anthropic.com) (requires billing)
 
 That is all that is required. There is no npm install, no server to run, and no environment variables to configure.
 
 ### Getting an API key
 
-**Google Gemini (default — free)**
+**Google Gemini (default)**
 
 1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and sign in with a Google account
-2. Create a new API key — no credit card or billing setup required
+2. Create a new API key — no credit card or billing setup required for the key itself
 3. Paste it into the **Gemini API key** field in the sidebar
 
-Gemini 2.5 Flash is available on the free tier with a daily request quota. On this path, agent calls run sequentially (rather than in parallel) to respect the free-tier rate limit of 10 requests per minute — sessions take a little longer but cost nothing. Google's free tier carries a data-use clause: inputs and outputs may be used to improve Google's products.
+Gemini 2.5 Flash is available on a free tier with a daily request quota. For regular use, enabling billing is strongly recommended — it raises the daily limit to 10,000 requests and unlocks true parallel agent execution. See [Gemini billing setup](#gemini-billing-setup). Google's free tier carries a data-use clause: inputs and outputs may be used to improve Google's products.
 
 **Anthropic (paid, parallel, with prompt caching)**
 
@@ -170,7 +170,7 @@ The interface is divided into a **sidebar** (always visible) and a **main panel*
 | Section | Purpose |
 |---|---|
 | **Swarm title** (clickable) | Opens the brief editor modal |
-| **Provider** | Gemini (free, default) or Anthropic — radio selector + key field |
+| **Provider** | Gemini (default) or Anthropic — radio selector + key field |
 | **Session cost** | Live cost tracker with cache hit rate |
 | **Agents** | Agent list with status, edit, and delete controls |
 | **Depth** | Brief / Detailed / Exhaustive output length |
@@ -430,7 +430,7 @@ Approximate token prices per million:
 
 Gemini 2.5 Flash Lite is used for compression and mandate-rewriting tasks — the same "cheap model for cheap tasks" principle as Haiku on the Anthropic path. All generation, debate, synthesis, meta-agent, and roster calls use Gemini 2.5 Flash.
 
-The **Opus toggle** (Anthropic path only) applies to synthesis, meta-agent, and roster agent calls — the three calls where reasoning quality most directly affects the session's value. On Gemini, the toggle is greyed out; all roles use Gemini 2.5 Flash. Generation and debate remain on the strong model regardless of the toggle.
+The **Opus toggle** (Anthropic path only) applies to synthesis, meta-agent, and roster agent calls — the three calls where reasoning quality most directly affects the session's value. On Gemini, the synthesis model section is hidden entirely; all roles use Gemini 2.5 Flash. Generation and debate remain on the strong model regardless of the toggle.
 
 ### Reducing or eliminating API costs
 
@@ -453,7 +453,7 @@ If your research falls within scope, these programmes represent the most cost-ef
 
 As of v4.4.0, Gemini is the default provider in Research Swarm — no Anthropic billing is required. Gemini 2.5 Flash is available on the free tier with a daily request quota, requiring only a Google account.
 
-The free tier carries a data-use clause: Google may use inputs and outputs to improve their products. Agent calls run sequentially on the Gemini path (rather than in parallel) to respect the free-tier rate limit of 10 requests per minute. Sessions take somewhat longer than the Anthropic path but cost nothing within the daily quota.
+The free tier carries a data-use clause: Google may use inputs and outputs to improve their products. The daily request limit (20–250 RPD depending on account) is the binding constraint on the free tier — a single 10-agent session can exhaust it. Enabling billing is recommended for any regular use; see [Gemini billing setup](#gemini-billing-setup).
 
 <a name="gemini-billing-setup"></a>
 #### Gemini billing setup — the recommended approach
@@ -608,8 +608,8 @@ The brief is the largest single cost driver in the tool. Two principles apply:
 
 **Mandates are billed at full price per call** — they are intentionally kept outside the cached block so that editing one agent's mandate does not invalidate the shared cache for all other agents. Keep individual mandates under ~300 tokens (~1,200 characters) each.
 
-### Primer-then-parallel generation (Anthropic path)
-Cache entries only become available after a response begins streaming — they are not available for concurrent parallel requests. To exploit this, agent[0] runs alone first (writing the cache), then agents[1–N] run in parallel (reading from the warm cache). This adds the latency of one serial agent call at the start of each generation round but saves ~90% of the brief input cost for all subsequent agents. On the Gemini path there is no prompt caching, so all agents run sequentially with a small inter-call delay instead.
+### Primer-then-parallel generation (Anthropic path only)
+Cache entries only become available after a response begins streaming — they are not available for concurrent parallel requests. To exploit this, agent[0] runs alone first (writing the cache), then agents[1–N] run in parallel (reading from the warm cache). This adds the latency of one serial agent call at the start of each generation round but saves ~90% of the brief input cost for all subsequent agents. On the Gemini path there is no prompt caching, so all agents fire in true parallel immediately — no primer, no sequencing overhead.
 
 ### Mandate as uncached second block
 The agent mandate follows the cached brief as a separate, uncached block. Editing one agent's mandate does not invalidate the shared cache for other agents' calls. All ten agents share a single cache entry, written once and read nine times per generation round.
@@ -643,11 +643,11 @@ There is no build step, no bundler, no package manager, and no server-side compo
 
 | Call type | Anthropic model | Gemini model | Caching (Anthropic) | Gemini parallelism |
 |---|---|---|---|---|
-| Generation (per agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Sequential |
-| Debate (per responding agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Sequential |
-| Generation compression (batched) | **Haiku 4.5** | 2.5 Flash | ✅ Cached brief | Sequential |
+| Generation (per agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
+| Debate (per responding agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
+| Generation compression (batched) | **Haiku 4.5** | 2.5 Flash Lite | ✅ Cached brief | — |
 
-On the Anthropic path, the primer agent runs first to write the cache, then all remaining agents run in parallel reading from it. On the Gemini path, all agents run sequentially with a 1,500 ms inter-call delay to stay within the free-tier 10 RPM limit. Prompt caching is an Anthropic-specific feature and is not used on the Gemini path.
+On the Anthropic path, agent[0] runs alone first to write the prompt cache, then all remaining agents run in `Promise.all` reading from it. On the Gemini path, all agents fire in true parallel with no delays — prompt caching is Anthropic-specific and is not used on the Gemini path.
 | Synthesis | Sonnet 4.6 / **Opus 4.6** | Cached brief only | ✅ Cached brief |
 | Meta-agent | Sonnet 4.6 / **Opus 4.6** | Plain string | ❌ |
 | Roster agent | Sonnet 4.6 / **Opus 4.6** | Cached brief | ✅ Cached brief |

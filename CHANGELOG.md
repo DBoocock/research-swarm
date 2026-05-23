@@ -1,5 +1,51 @@
 # Changelog
 
+## v4.5.0
+
+### Bug fixes and provider/display refactor
+
+#### Navigation and tab locking
+
+- Tabs are now locked (pointer-events:none, dimmed) during all running states — generation, debate, and synthesis — and unlock only after the full chain (including meta-agent) completes
+- The "launch debate round →" button was permanently disabled after synthesis completed. Root cause: `renderPairingsPanel()` was called from inside `runSynthesis()` while `S.running` was still true (it only clears in `runDebate`/`runGen` after `runSynthesis` returns). Fixed by re-rendering the pairings panel at the end of `runGen`/`runDebate` after `S.running=false`
+- Launch button is now visually disabled (`.launch-btn:disabled`) whenever `S.running` is true at render time
+
+#### Synthesis display — blank panel and silent error
+
+- The synthesis card (`syn-body`) was appended to the panel *after* `compressGenerationOutputs()` completed. A compression API error (e.g. 429 exhaustion) caused `runSynthesis()` to catch and return early — leaving panel-syn blank with a ghost "running" header and tabs unlocking with no explanation
+- Fixed by moving the synthesis card creation and `panel.appendChild(sc)` to before any async work, so `syn-body` is always in the DOM and has somewhere to display errors
+- All async work in `runSynthesis()` is now wrapped in a single try/catch; errors are written into `syn-body` and the badge flips to a new `.b-err` (red) state rather than failing silently
+- Fixed `saveRound()` call in `runSynthesis()` which was always passing `undefined` for the `includeDebate` argument, causing `debateOutputs: {}` to be saved on all post-debate records. Now correctly passes `saveRound(includeDebate)`
+
+#### Roster agent panel
+
+- "Apply correction" was silently failing for some agents. Root cause: `autoApplyMandate()` was called via inline `onclick` with `encodeURIComponent(issue)` and `encodeURIComponent(suggestion)` strings embedded in HTML attributes. LLM-generated suggestion text containing parentheses, equals signs, or other characters that survive URL-encoding but confuse the HTML attribute parser caused the onclick to fail without error for those specific agents
+- Fixed by introducing a module-level `pendingMandateUpdates = new Map()` keyed by integer index. The onclick now passes only a safe integer (`autoApplyMandate(0, this)`), completely bypassing the encoding issue
+- "Edit manually" opened the agent editor behind the roster modal. Fixed by setting `#agent-modal { z-index: 200 }` (roster modal is z-index 100). Added `editMandateManually(idx)` which registers a `_onAgentSaveCallback` before opening the editor; after `saveAgent()` fires, the callback updates the roster card's mandate preview in place so the change is visible without closing the roster
+- Mandate preview text in the roster card now updates immediately after "apply correction" succeeds (was showing stale text despite the mandate being correctly updated in memory)
+- Success status element (`mandate-apply-status`) is now shown after apply completes — `display:none` was never cleared in the success branch
+
+#### Provider display
+
+- Gemini radio button label: "Gemini free tier" → "Gemini"
+- Synthesis model section (Sonnet/Opus toggle) is now hidden entirely when Gemini is selected — was previously disabled but still visible, implying it might do something. Section appears only when Anthropic is selected
+- `setProvider()` called on init so the correct UI state applies on first load (synthesis model section correctly hidden for the Gemini default)
+- Updated Gemini key hint text and initial status message to remove "free" references; updated to reflect pay-as-you-go billing as the recommended setup
+
+#### Provider/caching refactor — Gemini parallelisation
+
+- `agentSystemBlocks()` and `briefOnlyBlock()` now only attach `cache_control: {type:'ephemeral'}` when `S.provider === 'anthropic'`. Previously the field was always present and relied on `GeminiProvider` silently stripping it during message conversion — an implicit coupling. Now explicitly provider-gated at the source
+- `callParallel()` refactored: Anthropic is the special case (runs `fns[0]` alone to write the cache, then `Promise.all` for the rest); Gemini and all future providers get plain `Promise.all` — true parallel execution with no inter-call delays
+- Removed `GEMINI_INTER_CALL_DELAY_MS`, `GEMINI_POST_BATCH_DELAY_MS`, and `geminiDelay()` entirely. Billing-enabled Gemini accounts have 1,000 RPM; the delays were only necessary for the 10 RPM free tier
+- `runGen` and `runDebate` call sites simplified to `callParallel(allAgents.map(...))` — no primer extraction, no `slice(1)`, identical code for both providers. Provider-specific execution strategy is fully encapsulated in `callParallel()`
+- Removed all provider-branching status messages ("writing cache / sequentially / pausing for rate limit")
+- Removed dead `rpd-warn` HTML element and associated `renderCost()` logic (free-tier RPD warning, never triggered on billing-enabled accounts)
+- Updated stale comments in `apiStream`, `GeminiProvider`, and `runGen` that described the old sequential/stripping/primer-in-place approach
+
+Verified against session exports across multiple rounds including mid-session agent addition and promotion flows, on both Gemini and Anthropic providers.
+
+---
+
 ## v4.4.4
 
 ### Flash Lite for cheap tasks; corrected Gemini billing documentation; cost display

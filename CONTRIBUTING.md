@@ -6,7 +6,7 @@ Thanks for your interest. This document covers the architecture, known weak poin
 
 ## Running the project
 
-Open `index.html` in a browser. No build step, no server, no dependencies beyond Google Fonts. You need an API key — either Anthropic or Google Gemini (free tier). See the README for how to get one and for information on free API credit programmes.
+Open `index.html` in a browser. No build step, no server, no dependencies beyond Google Fonts. You need an API key — either Anthropic or Google Gemini (billing-enabled recommended; see README for setup). See the README for how to get one and for information on free API credit programmes.
 
 ---
 
@@ -14,15 +14,21 @@ Open `index.html` in a browser. No build step, no server, no dependencies beyond
 
 **Single file by design.** Everything lives in `index.html`. This is a deliberate constraint: the tool is meant to be trivially shareable and deployable from a filesystem or GitHub Pages without any infrastructure. If you feel the urge to split it into modules, that's a signal the feature is probably too complex for this tool's scope, not that the constraint should be relaxed.
 
-This constraint is worth revisiting as the codebase grows. The current size (~1,957 lines) is manageable, but the multi-provider API work (issue #6) may push complexity to the point where a modular source tree becomes the right call. The user-facing single-file experience can be preserved even with a multi-file source tree by introducing a lightweight build step (e.g. `esbuild` or a simple concatenation script) that bundles everything into a single `index.html` for distribution. This would be an acceptable evolution if the alternative is provider logic becoming genuinely hard to navigate in a single file. The decision should be revisited explicitly after the issue #6 merge. Until then, the single-file constraint holds.
+This constraint is worth revisiting as the codebase grows. The current size (~2,200 lines) is manageable, but further multi-provider work may push complexity to the point where a modular source tree becomes the right call. The user-facing single-file experience can be preserved even with a multi-file source tree by introducing a lightweight build step (e.g. `esbuild` or a simple concatenation script) that bundles everything into a single `index.html` for distribution. This would be an acceptable evolution if the alternative is provider logic becoming genuinely hard to navigate in a single file.
 
 **The brief is the primary lever.** The application is domain-agnostic. Adapting it to a new research problem means editing the brief — problem context, research context, available data — not touching the code. The agent mandates are secondary. The generation, debate, synthesis, and meta-agent machinery is fully domain-agnostic and should stay that way.
 
-**Caching is structured around one invariant (Anthropic path only).** The combined brief (all three fields) is sent as a single cached block with every generation and debate call. The agent mandate follows as a separate uncached block. This means: editing the brief invalidates the cache for all agents simultaneously; editing one mandate does not affect others. Any change to how prompts are assembled needs to preserve this invariant or explicitly justify breaking it. Prompt caching is Anthropic-specific — do not attempt to port it to other providers.
+**Caching is structured around one invariant (Anthropic path only).** The combined brief (all three fields) is sent as a single cached block with every generation and debate call. The agent mandate follows as a separate uncached block. This means: editing the brief invalidates the cache for all agents simultaneously; editing one mandate does not affect others. Any change to how prompts are assembled needs to preserve this invariant or explicitly justify breaking it. Prompt caching is Anthropic-specific — `cache_control` fields are only attached on the Anthropic path and must never be sent on other provider paths.
 
-**Model routing by call type.** Different calls use different models — see the `MODELS` constant and `modelFor()` in the source. `MODELS` is two-dimensional: `MODELS[role][provider]`. `modelFor(role)` resolves the correct string for the active provider and respects the Sonnet/Opus toggle (Anthropic only). The principle: use the cheapest model that produces adequate quality for the task. Generation and debate use the strong model (Sonnet / Gemini 2.5 Flash). Synthesis and meta-agent are configurable on Anthropic (Sonnet default, Opus available); on Gemini the toggle is greyed out. Compression and mandate generation use the cheapest available model — simple tasks where reasoning depth is not needed.
+**Model routing by call type.** Different calls use different models — see the `MODELS` constant and `modelFor()` in the source. `MODELS` is two-dimensional: `MODELS[role][provider]`. `modelFor(role)` resolves the correct string for the active provider and respects the Sonnet/Opus toggle (Anthropic only). The principle: use the cheapest model that produces adequate quality for the task. Generation and debate use the strong model (Sonnet / Gemini 2.5 Flash). Synthesis and meta-agent are configurable on Anthropic (Sonnet default, Opus available); on Gemini the synthesis model section is hidden entirely. Compression and mandate generation use the cheapest available model — simple tasks where reasoning depth is not needed.
 
-**Provider abstraction.** The tool supports multiple API providers via a clean provider abstraction layer. Gemini is the default (free within Google AI Studio quota); Anthropic remains fully available. All provider-specific logic — endpoint, auth, request format, streaming format, caching — is isolated in the `AnthropicProvider` and `GeminiProvider` objects. The unified `apiStream()` function dispatches to the active provider. Adding a third provider means: implement a provider object, add a column to `MODELS`, add `PRICING` entries, add a UI radio option. No changes elsewhere. Prompt caching is Anthropic-specific — do not port it. On Gemini, `callParallel()` runs calls sequentially with a 1,500 ms delay to respect free-tier RPM limits; on Anthropic it uses `Promise.all`.
+**Provider abstraction.** The tool supports multiple API providers via a clean provider abstraction layer. Gemini is the default; Anthropic remains fully available. All provider-specific logic — endpoint, auth, request format, streaming format, caching — is isolated in the `AnthropicProvider` and `GeminiProvider` objects. The unified `apiStream()` function dispatches to the active provider. Adding a third provider means: implement a provider object, add a column to `MODELS`, add `PRICING` entries, add a UI radio option. No changes elsewhere.
+
+`callParallel(fns)` is the single point where provider execution strategy diverges:
+- **Anthropic**: runs `fns[0]` alone first (writes the prompt cache), then `fns[1..N]` in `Promise.all` (reads from warm cache).
+- **Gemini and all other providers**: fires all functions in `Promise.all` immediately — true parallel, no delays.
+
+All inter-call delays and rate-limiting logic have been removed from the Gemini path; billing-enabled accounts have 1,000 RPM, which makes them unnecessary. The only reason for the Anthropic primer is prompt caching, not rate limiting.
 
 **State lives in memory.** There is no localStorage, no server, no database. Session state is exported as JSON after every synthesis and can be re-imported. This is deliberate — explicit export/import is more transparent and reliable than implicit browser storage, and avoids false durability expectations. Do not add localStorage without a strong reason and an explicit user control to clear it.
 
@@ -42,9 +48,11 @@ The API key field uses a proper HTML `<form>` with `autocomplete="current-passwo
 
 **Session state is not fully restored on import.** When importing a previous session, the streaming outputs from past rounds are not re-rendered (they are preserved in the exported JSON but the UI cards are not rebuilt). The session log repopulates and the accumulated research intelligence is intact, but the Generation and Debate tabs are empty. See issue #4.
 
-**Debate pairings not updated between rounds.** Confirmed bug where meta-agent proposals are not applied at debate launch in some rounds, causing identical pairings to repeat. Intermittent — suspected interaction with mid-session agent addition. See issue #7.
+**Reflection round** (highest priority feature). Agents carry static generation outputs from round 1 across all subsequent rounds. The meta-agent reasons about potentially stale directions. A reflection round — agents reading the synthesis digest and revising their direction proposals — is the minimal viable fix. See issue #5.
 
-**Free/low-cost version.** ✓ Resolved in v4.4.0. Google Gemini 2.5 Flash is now the default provider (free within Google AI Studio daily quota). Anthropic remains fully available. See issue #6 and CHANGELOG.
+**Gemini context caching** (low priority optimisation). The brief is currently re-sent as a system instruction on every Gemini API call. Google offers context caching with similar token savings to Anthropic prompt caching, but the implementation is meaningfully more complex (explicit cache object creation, TTL management, mid-session invalidation on brief edits). Not worth implementing until session sizes grow or costs become a practical concern. See issue #9.
+
+**Free-tier onboarding mode** (separate issue). The recommended setup is billing-enabled Gemini. A constrained free-tier mode with lower agent counts and graceful RPD handling is tracked separately. See issue #8.
 
 ---
 
@@ -64,6 +72,7 @@ The API key field uses a proper HTML `<form>` with `autocomplete="current-passwo
 - Storing API keys anywhere other than the in-memory input field.
 - Prompt changes that break the cached brief block invariant silently.
 - Provider-specific logic (caching, auth, request format) outside the provider abstraction layer.
+- Attaching `cache_control` fields to requests on non-Anthropic provider paths.
 
 ---
 
