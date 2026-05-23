@@ -1455,7 +1455,7 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     parseSynthesis(result);
     await geminiDelay();
     await runMeta(result);
-    saveRound();
+    saveRound(includeDebate);
     autoExportJson();
     autoExportMd();
   }catch(e){if(e.name!=='AbortError')setStatus('Synthesis error: '+e.message);}
@@ -1784,6 +1784,40 @@ function renderPairingsPanel(){
   if(!S.pairingProposals.length){panel.innerHTML='<div class="empty-state"><span class="big">No proposals yet</span>Run generation and synthesis first.</div>';return;}
   panel.appendChild(makeSectionLabel(`Proposed debate pairings — round ${S.currentRound+1}`));
   panel.appendChild(makeNotice('Agents may have multiple pairings — shown as N↔ in the sidebar. Toggle pairs on/off, then launch the debate round.'));
+
+  // Show previous round's pairings for comparison — makes accidental repetition
+  // immediately visible and confirms the meta-agent proposals were applied correctly.
+  const lastRoundWithDebate = [...S.rounds].reverse().find(r => Object.keys(r.debateOutputs||{}).length > 0);
+  if(lastRoundWithDebate && lastRoundWithDebate.pairingProposals && lastRoundWithDebate.pairingProposals.length){
+    const prevWrap=document.createElement('div');prevWrap.className='pair-panel';prevWrap.style.opacity='0.55';prevWrap.style.marginBottom='10px';
+    const prevHdr=document.createElement('div');prevHdr.className='pair-panel-hdr';
+    prevHdr.innerHTML=`<span style="font-family:var(--serif);font-style:italic;font-size:13px;color:var(--text2);flex:1">Previous round pairings (round ${lastRoundWithDebate.round})</span>`;
+    prevWrap.appendChild(prevHdr);
+    const prevList=document.createElement('div');prevList.className='pair-list';
+    // Compute set of new proposal keys to highlight repeated pairs
+    const newPairKeys=new Set(S.pairingProposals.map(p=>p.id1+'|'+p.id2));
+    lastRoundWithDebate.pairingProposals.forEach(pair=>{
+      const a1=agents.find(a=>a.id===pair.id1),a2=agents.find(a=>a.id===pair.id2);
+      const typeClass={'CONTRADICTION':'pt-c','INTERSECTION':'pt-i','DISRUPTION':'pt-d','BRIDGE':'pt-b'}[pair.type]||'pt-b';
+      const isRepeated=newPairKeys.has(pair.id1+'|'+pair.id2);
+      const item=document.createElement('div');item.className='pair-item on';item.style.cursor='default';
+      if(isRepeated) item.style.outline='1px solid rgba(200,100,80,.5)';
+      item.innerHTML=`<div class="ptoggle on" style="pointer-events:none;opacity:0.4">✓</div>
+        <div style="flex:1">
+          <div class="pair-agents">
+            <span class="pat" style="background:${a1?.color}22;color:${a1?.color}">${a1?.name||pair.id1}</span>
+            <span style="color:var(--text3);font-size:11px">→</span>
+            <span class="pat" style="background:${a2?.color}22;color:${a2?.color}">${a2?.name||pair.id2}</span>
+            <span class="ptb ${typeClass}">${pair.type}</span>
+            ${isRepeated?'<span style="font-size:10px;color:rgba(200,100,80,.9);margin-left:4px">repeated</span>':''}
+          </div>
+        </div>`;
+      prevList.appendChild(item);
+    });
+    prevWrap.appendChild(prevList);
+    panel.appendChild(prevWrap);
+  }
+
   const wrap=document.createElement('div');wrap.className='pair-panel';
   const ph=document.createElement('div');ph.className='pair-panel-hdr';
   ph.innerHTML=`<span style="font-family:var(--serif);font-style:italic;font-size:14px;color:var(--text);flex:1">Debate pair proposals</span><span class="badge b-deb">${S.pairingProposals.filter(p=>p.enabled).length} active</span>`;
@@ -1983,15 +2017,23 @@ function renderOverlapMatrix(){
 // ══════════════════════════════════════════════════════════
 // SESSION LOG + EXPORT
 // ══════════════════════════════════════════════════════════
-function saveRound(){
+function saveRound(includeDebate){
   // Use S.rounds.length+1 as the sequence number so each saved record gets a
   // unique incrementing label regardless of how many synthesis calls happen
   // per generation round (generation synthesis + debate synthesis both call
   // saveRound with the same S.currentRound value, causing duplicate labels).
+  //
+  // includeDebate: only save S.currentDebate when a debate actually ran this
+  // synthesis cycle. When called after a post-generation synthesis (including
+  // the mid-session new-agent path), S.currentDebate still holds the previous
+  // round's debate outputs — saving them would corrupt the export and make the
+  // log appear to show stale/repeated debate pairs. Pass false (or omit) for
+  // post-generation saves; pass true only from runSynthesis(true) (post-debate).
   const seqNum = S.rounds.length + 1;
   S.rounds.push({
     round:seqNum,ts:new Date().toISOString(),depth:S.depth,
-    generationOutputs:{...S.currentGen},debateOutputs:{...S.currentDebate},
+    generationOutputs:{...S.currentGen},
+    debateOutputs:includeDebate ? {...S.currentDebate} : {},
     synthesis:S.currentSynthesis,pairingProposals:[...S.pairingProposals],
     retirementProposals:[...S.retirementProposals]
   });
