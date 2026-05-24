@@ -28,6 +28,7 @@ The tool is built on the well-established multi-agent debate framework and is no
 - [Cost tracking and prompt caching](#cost-tracking-and-prompt-caching)
   - [Gemini billing setup](#gemini-billing-setup)
 - [Saving and exporting](#saving-and-exporting)
+  - [API key security and privacy](#api-key-security-and-privacy)
 - [Adapting to a new research domain](#adapting-to-a-new-research-domain)
 - [Token optimisation details](#token-optimisation-details)
 - [Architecture](#architecture)
@@ -549,6 +550,12 @@ Two manual export buttons are available in the tab bar:
 
 The API key is never saved anywhere — you will need to re-enter it after importing a session. Session state is not persisted in the browser between tabs or windows; always rely on the auto-exported files to preserve work.
 
+### API key security and privacy
+
+Keys are held only in JavaScript memory for the lifetime of the tab — never written to `localStorage`, `sessionStorage`, cookies, or any other browser storage, and never included in session exports. The only outbound network calls the application makes are to `api.anthropic.com` and `generativelanguage.googleapis.com`. There is no analytics or telemetry. Because the entire application is a single auditable HTML file with no server component, you can verify exactly what happens to your key before running it.
+
+One technical note: Google's Gemini API requires authentication via a URL query parameter (`?key=...`) rather than a request header. All requests are made over HTTPS so the key is encrypted in transit on normal networks. On networks that perform SSL inspection (common in some corporate environments in regulated industries), the full request URL including the key would be visible in proxy logs. If you are on such a network and key confidentiality matters, prefer the Anthropic provider, whose key is sent as a request header. For most users on personal or research networks this is not a concern.
+
 ---
 
 ## Adapting to a new research domain
@@ -635,7 +642,7 @@ After the first round, the generation button only runs agents with no existing o
 
 The entire application is a single HTML file with no external dependencies beyond:
 - Google Fonts (DM Mono, Instrument Serif) — loaded from `fonts.googleapis.com`
-- The active API provider — either the Anthropic API (using the `anthropic-dangerous-direct-browser-access: true` header) or the Google Gemini API, called directly from the browser
+- The active API provider — either the Anthropic API (using the `anthropic-dangerous-direct-browser-access: true` header) or the Google Gemini API (key sent as a URL query parameter)
 
 There is no build step, no bundler, no package manager, and no server-side component. All state is held in memory in the browser tab. The application can be served from a local filesystem, a static file host, or GitHub Pages.
 

@@ -34,6 +34,8 @@ All inter-call delays and rate-limiting logic have been removed from the Gemini 
 
 The API key field uses a proper HTML `<form>` with `autocomplete="current-password"` so that browser password managers (Firefox, 1Password, Bitwarden etc.) can offer to save and autofill it securely. The key is never stored in JavaScript — the browser's encrypted credential vault handles this entirely. Do not replace this with localStorage.
 
+For institutional or team deployment where users should not hold their own API keys, place a reverse proxy in front of the application that attaches keys server-side.
+
 ---
 
 ## Known weak points — good places to contribute
