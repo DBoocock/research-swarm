@@ -12,6 +12,10 @@ The tool is built on the well-established multi-agent debate framework and is no
 
 ---
 
+**Live:** [dboocock.github.io/research-swarm](https://dboocock.github.io/research-swarm/) — open in your browser, add an API key, and run immediately. No installation required.
+
+---
+
 ## Contents
 
 - [How it works](#how-it-works)
@@ -117,9 +121,14 @@ This cycle repeats. Research directions, contradictions, and matrix entries accu
 
 - A modern web browser (Chrome, Firefox, Safari, Edge)
 - A free Google Gemini API key **or** an Anthropic API key — see below
-- No server, build step, or internet connection beyond the chosen API
 
-### Installation
+### Quickstart — hosted version
+
+Visit **[dboocock.github.io/research-swarm](https://dboocock.github.io/research-swarm/)**, select your API provider in the sidebar, enter your key, and you're ready to run. No installation, no download.
+
+### Local installation
+
+If you prefer to run the tool locally or want to modify the code:
 
 1. Clone this repository:
    ```bash
@@ -139,7 +148,7 @@ This cycle repeats. Research directions, contradictions, and matrix entries accu
    - **Google Gemini** (default): get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
    - **Anthropic**: get a key at [console.anthropic.com](https://console.anthropic.com) (requires billing)
 
-That is all that is required. There is no npm install, no server to run, and no environment variables to configure.
+There is no npm install, no server to run, and no environment variables to configure.
 
 ### Getting an API key
 
