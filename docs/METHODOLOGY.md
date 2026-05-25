@@ -107,23 +107,23 @@ The current three-field structure is a pragmatic first approximation. A more pri
 ```mermaid
 flowchart TD
     subgraph Brief
-        M["Mission\n(identity + session goals)"]
-        P["Properties\n(treat as truth — constraints)"]
-        Po["Postulates\n(treat as truth — researcher-flagged)"]
-        H["Hypotheses\n(explore, do not assume)"]
-        Q["Open Questions\n(seed, do not constrain)"]
-        C["Context\n(build on this)"]
-        D["Data\n(available variables + scale)"]
-        DP["Data Policy\n(tractability instructions)"]
+        NM["Mission\n(identity + session goals)"]
+        NP["Properties\n(treat as truth — constraints)"]
+        NPo["Postulates\n(treat as truth — researcher-flagged)"]
+        NH["Hypotheses\n(explore, do not assume)"]
+        NQ["Open Questions\n(seed, do not constrain)"]
+        NC["Context\n(build on this)"]
+        ND["Data\n(available variables + scale)"]
+        NDP["Data Policy\n(tractability instructions)"]
     end
-    M --> Agent
-    P --> Agent
-    Po --> Agent
-    H --> Agent
-    Q --> Agent
-    C --> Agent
-    D --> Agent
-    DP --> Agent
+    NM --> Agent
+    NP --> Agent
+    NPo --> Agent
+    NH --> Agent
+    NQ --> Agent
+    NC --> Agent
+    ND --> Agent
+    NDP --> Agent
 ```
 
 The key design insight is that **the same information, placed in different sections, gives agents different instructions about how to treat it**. A claim in Properties is a constraint; the same claim in Hypotheses is an invitation to explore. The section structure is a lightweight formal language for the researcher's epistemic intentions.
@@ -451,57 +451,120 @@ This is worth stating explicitly, because the choices *look* principled — and 
 
 ### 9.1 The problem being solved
 
-In the current system, agents produce generation outputs once and carry them unchanged through all subsequent rounds. The meta-agent reasons about potentially stale directions. Agents that have been debated extensively never incorporate what they learned from debate into their subsequent outputs.
+In the current system, agents produce generation outputs once and carry them unchanged through all subsequent rounds. The meta-agent reasons about potentially stale directions. Agents that have been debated extensively never incorporate what they learned from debate into their subsequent outputs, and an agent that receives a critique has no mechanism to respond to it before the next time that pair debates.
 
-This is a significant limitation. After a productive debate between the Bayesian and evolutionary frameworks, the Bayesian agent might discover that its hierarchical model structure maps naturally onto the Price equation. This insight is captured in the debate output and reaches the synthesis agent — but it never reaches the Bayesian agent's own subsequent generation output. The next round's generation produces the same directions as the first.
+This is a significant limitation. After a productive debate between the Bayesian and evolutionary frameworks, the Bayesian agent might discover that its hierarchical model structure maps naturally onto the Price equation. This insight is captured in the debate output and reaches the synthesis agent — but it never reaches the Bayesian agent's own subsequent generation output. The next round's generation produces the same directions as the first. Meanwhile, if the evolutionary agent has a substantive rebuttal to the Bayesian critique, there is currently no way for it to communicate that rebuttal before the pair debates again — the Bayesian agent may re-raise the same points that have already been answered.
 
-### 9.2 The proposed design
+### 9.2 What both sides of a debate can learn
 
-After each debate round, each agent that **participated in debate** receives a reflection prompt. Agents that have not yet debated (including newly added agents that have only generated) do not receive a reflection — there is nothing to reflect on. The reflection prompt is:
+Debate in the current system is unidirectional per call (Agent 1 critiques Agent 2's generation output), but both agents can potentially learn from the exchange:
 
-> *"You participated in the following debate exchanges this round: [summaries of debates this agent was involved in]. Without changing your disciplinary mandate or methodological commitments, write 2–3 sentences noting what you now understand better about the theoretical landscape — for example, where another framework identifies something your framework cannot easily address, or where a tension you identified turned out to be more tractable than expected. If debate resolved a problem that was blocking your theoretical progress, you may also note a new direction this unlocks — but it should remain within your disciplinary framework."*
+**Agent 1 (the critiquing agent)**
+- *Anti-repetition memory*: remembers what it previously argued to Agent 2 so it can build on it rather than repeating the same critique next time
+- *Framework learning*: generating a critique of Agent 2's framework sometimes reveals something about Agent 1's own — a limitation, a connection, or a direction that Agent 1's framework can now pursue having understood what Agent 2's offers
 
-The final sentence — permitting new directions unlocked by debate — is a deliberate design choice. If debate resolves a conceptual barrier, the agent should be able to act on that resolution rather than remain stuck. The constraint "within your disciplinary framework" is the guard against homogenisation: the agent can go further, but not in a different direction.
+**Agent 2 (the critiqued agent)**
+- *Rebuttal*: may have a substantive response to Agent 1's critique that should be communicated before they debate again — preventing Agent 1 from re-raising points already answered
+- *Unlocked directions*: Agent 1's critique may identify something Agent 2's framework cannot address, or may point toward a tractable path Agent 2 had not seen — this can unlock new generation content
 
-Reflection outputs are stored per-agent (`S.agentReflections[agentId]`) and injected into future generation and debate calls as an additional uncached message — not into the system prompt, which would invalidate the shared prompt cache.
+In addition, since agents can be involved on either side of multiple debate pairings in a single round, all debate information relevant to a single agent should be **collated and processed together** in a single reflection call. This allows the agent to synthesise insights from multiple exchanges simultaneously, which is where the richest interdisciplinary directions are likely to emerge. Processing each debate sequentially would miss connections across debates.
+
+### 9.3 The proposed design — two calls per agent
+
+The reflection round consists of two sequential calls per agent, both using the **strong model** (Sonnet / Gemini Flash). Both calls run after the debate round and before the next synthesis. Agents that have not participated in any debate (including newly added agents) skip the reflection round entirely.
+
+**Call 1 — Reflection**
+
+The agent receives all debates it was involved in (on either side), collated. The prompt asks for:
+
+1. For each critique *received*: what does it teach the agent? Is there a substantive rebuttal?
+2. For each critique *generated*: did studying the partner's framework reveal anything that advances the agent's own directions?
+3. Across all exchanges: are there new or deepened directions unlocked by the combination of insights from this round's debates?
+
+The output is **structured** — the agent produces labelled sections (rebuttals per partner, framework learning, unlocked directions) rather than free prose. This structure is what allows the downstream injection to be targeted rather than broadcasting everything to everyone.
+
+The reflection output is stored in a structured per-agent state object:
+
+```js
+S.agentReflections[agentId] = {
+  rebuttals: { partnerId: "rebuttal text" },          // injected to partner before next debate
+  priorCritiques: { partnerId: "full critique text" }, // injected to self before next debate
+  learning: "what generating critiques taught this agent about its own framework"
+  // learning feeds into Call 2 (generation extension) — not injected before future debates.
+  // Its value is expressed through the appended generation output, not carried forward directly.
+}
+```
+
+**Call 2 — Generation extension**
+
+The agent receives its original generation output plus the full reflection output from Call 1 (rebuttals received, what critiques generated taught the agent, unlocked directions). The prompt asks it to generate new or deepened research directions based on what it learned — directions that either were blocked before and are now unlocked, or that go deeper than the original generation given the new understanding. The output is **appended to `S.currentGen[agentId]`**, making it immediately available to the synthesis agent and the meta-agent for the current round.
+
+The `learning` field from Call 1 is the richest input for generation extension — it captures what the agent now understands about its own framework's limits and opportunities. Its value is expressed through the appended generation output rather than carried forward directly into future debate calls.
+
+The disciplinary constraint is intentionally permissive: *"remain largely within your disciplinary framework, or at least draw heavily on your disciplinary framework if the direction is genuinely interdisciplinary."*
 
 ```mermaid
 flowchart TD
-    D["Debate outputs\n(current round)"] --> R["Reflection round\nonly for agents that debated\n~150-200 tokens each"]
-    R --> AR["S.agentReflections\nagentId → reflection text"]
-    AR --> DN["Next debate call\nreflection injected as\nuncached message"]
-    NA["New agent\n(no prior debate)"] --> GN["Generation call\nno reflection injected"]
+    subgraph "Reflection round — per debating agent"
+        C1["Call 1 — Reflection\nStrong model\nAll debates this agent was in, both sides\n→ rebuttals per partner received\n→ prior critique text per partner critiqued\n→ framework learning\n→ unlocked directions"]
+        C2["Call 2 — Generation extension\nStrong model\nOriginal generation + reflection output\n→ new or deepened directions\n→ appended to currentGen"]
+        C1 --> C2
+    end
+    D["Debate outputs\ncurrent round"] --> C1
+    C2 --> GEN["currentGen — appended\n→ synthesis agent\n→ meta-agent"]
+    C1 --> REF["agentReflections — structured\n→ targeted injection\nbefore future debates"]
+    NA["New agent\nno prior debate"] --> SKIP["Skip reflection round\nno injection"]
 ```
 
-### 9.3 Key design constraints
+### 9.4 Targeted injection before future debate calls
 
-**Mandate stability is preserved.** Reflections are additive working memory only. The mandate remains the agent's stable disciplinary identity; the reflection captures what the agent has learned about the landscape in this session.
+The only reflection-derived injections before future debate calls are `priorCritiques` and `rebuttals`. Everything else agents receive on a debate call is the standard package: the brief (system prompt, cached), their mandate (system prompt, uncached), and the partner's generation output as the debate content.
 
-**Reflections are injected as messages, not system prompts.** This is essential for prompt cache correctness. The system prompt (brief + mandate) is shared across agents (brief) or stable within a session (mandate). A reflection that varies by agent and by round must be an uncached message, not part of the cached block.
+**Before Agent 1 debates Agent 2 (Agent 1 is critiquing):**
+1. `S.agentReflections[agent1Id].priorCritiques[agent2Id]` — if it exists, inject: *"In a previous round you sent the following critique to [Agent 2]: '[full prior critique text]'."*
+2. `S.agentReflections[agent2Id].rebuttals[agent1Id]` — if it exists, inject: *"[Agent 2] responded to that critique: '[rebuttal text]'."*
 
-**The ordering question.** The current implementation builds prompt caching in from the start, which shapes the reflection injection mechanism. An alternative approach would be to first find the best-performing reflection design and then optimise for cost. There is a genuine argument for the latter: caching constraints (minimum token counts, uncached message placement) may prevent the optimal design. For now, the cache-compatible design is preferred to avoid later architectural disruption, but this choice should be revisited if evaluation reveals that the injection mechanism is limiting quality.
+Prior critique is shown before rebuttal — the logical sequence is argument then response. `learning` is not injected before future debate calls. Its value is expressed through the appended generation output from Call 2, which Agent 1's partners already see as part of Agent 1's updated generation output. Injecting it would optimise Agent 1 as a debater, which is incidental to the debate's primary purpose — giving the best critique of the partner's framework — and would add unnecessary context window cost as it accumulates.
 
-### 9.4 The homogenisation risk
+**Before Agent 3 debates Agent 2 (a new partner):**
+Inject nothing from Agent 1/2 debate history. Agent 3 should critique Agent 2's current generation output (which already includes appended directions from reflection) without being anchored to issues Agent 1 already raised.
 
-If reflections cause agents to converge — e.g. all agents' reflections after a productive session express appreciation for each other's frameworks — subsequent outputs may lose the disciplinary distinctiveness that makes debate valuable. A UI toggle to enable/disable reflections is a prerequisite for any empirical investigation of this risk.
+**Call 2 (generation extension):**
+Receives the full reflection output from Call 1 including the `learning` field. This is the correct place for `learning` to have effect — it seeds new generation directions rather than shaping debating behaviour.
 
-### 9.5 Evaluation — a multi-objective problem
+**Meta-agent:**
+Receives a brief summary of which agents have pending rebuttals and what new directions were appended via generation extension. The rebuttal context must be framed carefully in the meta-agent prompt: it is supplementary context available *if a pair is selected for other reasons*, not a primary driver of pairing decisions. The meta-agent prompt should make clear that repeating a pairing should be driven by whether new theoretical territory remains to explore. A pairing that has exhausted productive territory should be retired regardless of whether a rebuttal exists. Treating rebuttals as the primary pairing signal risks locking the session into the same pairs indefinitely.
+
+**Roster agent:**
+Does not receive reflection outputs. Already sees updated generation outputs.
+
+### 9.5 Key design constraints
+
+**Mandate stability is preserved.** Reflections are additive working memory only. The mandate remains the agent's stable disciplinary identity.
+
+**Injected as messages, not system prompts.** The system prompt (brief + mandate) must remain stable to preserve the prompt cache. Reflection content varies by agent and by round — it must be injected as messages in the conversation array, not in the system prompt. This is also semantically correct: a system prompt sets what an agent *is*; an injected message records what an agent *experienced*.
+
+**Reflections accumulate.** Information generated during reflection — rebuttals, prior critiques, framework learning, extended generation outputs — accumulates across rounds rather than resetting. Genuine interdisciplinary convergence is not treated as a failure mode; it may be a genuine research finding. The homogenisation risk is managed through prompt design (the disciplinary grounding constraint) and through the UI toggle (section 9.6), not by discarding accumulated context.
+
+**Two-call modularity.** Reflection (Call 1) and generation extension (Call 2) are separate calls. This allows independent model routing in future, cleaner separation of concerns, and makes it easier to ablate one without the other during evaluation.
+
+**Cache compatibility.** Both calls use `agentSystemBlocks(mandate)` (brief + mandate as system prompt, with `cache_control` on Anthropic path) and inject reflection context as messages. No changes to the caching architecture are needed.
+
+### 9.6 UI toggle
+
+A UI toggle to enable/disable the reflection round is a prerequisite for empirical investigation. With reflections disabled, the tool behaves exactly as in v4.5.0. With reflections enabled, the full two-call pipeline runs after each debate round. The toggle state should be included in the JSON export so session comparisons are interpretable.
+
+### 9.7 Evaluation — a multi-objective problem
 
 Evaluating the reflection round requires measuring two competing objectives simultaneously:
 
-**Progress** — do subsequent outputs go further than they would have without reflection? Possible metrics: generation of new research directions not present before the debate, production of promising new debate pairings, evolution of the synthesis (new convergences or tensions identified). The synthesis text across rounds is perhaps the most natural comparison surface.
+**Progress** — do subsequent outputs go further than they would have without reflection? The most natural comparison surface is the appended generation content and the synthesis text across rounds — do new directions appear, do directions deepen, do new debate pairings emerge? The generation extension output (Call 2) is the primary measurable artefact of progress.
 
-**Homogenisation** — do agents become more similar to each other as a result of reflection? Possible metric: pairwise semantic similarity between agent outputs across rounds, measured on whatever outputs change between rounds.
+**Homogenisation** — do agents become more similar to each other as a result of reflection? Pairwise semantic similarity between agents' generation outputs (including appended content) across rounds is the right metric. Note that the reflection texts themselves would trivially show *high* between-agent similarity — agents that debated each other will reference each other's frameworks — so generation output similarity is the correct measure, not reflection text similarity.
 
-The current reflection design poses a challenge for both metrics: **generation outputs are currently fixed after the first round** (smart generation only runs for new agents). If generation outputs don't change, there is nothing agent-level to compare for divergence. This is a deeper argument for allowing agents to regenerate or append to their generation outputs after reflection — otherwise the only changing output is the reflection text itself, which will structurally contain references to debate partners' viewpoints and therefore trivially show low between-agent similarity. The 2–3 sentence reflection as proposed may be too lightweight to be meaningfully measurable as a standalone output.
+The two objectives are in tension but not mutually exclusive. Genuine interdisciplinary progress will cause some convergence; the question is whether the convergence is productive (shared understanding of a real connection) or degenerative (loss of disciplinary distinctiveness). This distinction is hard to measure automatically and may ultimately require researcher judgement — which is consistent with the tool's overall design philosophy.
 
-This suggests that the reflection round and the smart-generation design are coupled: to evaluate reflection properly, agents may need to produce updated or extended generation outputs after reflecting. Whether to allow full regeneration, incremental appending, or keep the minimal 2–3 sentence reflection (accepting the limited evaluability) is an open design question.
-
-The reflection round design as proposed is motivated by analogy with human learning and reflection in collaborative contexts, but there is no specific empirical citation supporting this particular design for multi-agent research ideation. It should be treated as a well-reasoned hypothesis pending evaluation.
-
-### 9.6 Accumulation vs. reset
-
-Should reflections accumulate across rounds (each round's reflection appended to prior ones) or reset each round (only the most recent reflection retained)? Accumulation gives richer context but grows token cost linearly with round count and increases the risk of homogenisation over time. Reset is cheaper and cleaner but loses continuity. This is an open design question best resolved empirically.
+The reflection round design is motivated by analogy with human learning in collaborative contexts, but has no specific empirical citation for multi-agent research ideation. It should be treated as a well-reasoned hypothesis pending evaluation against the v4.5.0 baseline.
 
 ---
 
