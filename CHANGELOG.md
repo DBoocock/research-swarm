@@ -1,5 +1,29 @@
 # Changelog
 
+## v4.5.1
+
+### Bug fixes, robustness improvements, and documentation
+
+#### Dynamic button encoding — root cause fix across all call sites
+
+- "Add agent" in the roster agent panel was silently failing for agents whose names contain special characters (e.g. "/" in "Psychometrics / expertise modelling"). Root cause: the same `encodeURIComponent` inline `onclick` attribute pattern fixed for `autoApplyMandate` in v4.5.0 was also present in `addRosterAgent`, `addRosterAgentEdit`, `applyStatusChange`, `acceptRec`, `togglePair`, and the research map tag buttons
+- All dynamic `onclick` attributes replaced with `addEventListener` closures across the entire codebase. A reusable `mkBtn(text, className, handler, extraStyle)` helper added alongside `makeSectionLabel` / `makeNotice` — all dynamically created buttons must now use this helper. Dynamic data is captured in a JS closure and never serialised into HTML, making the pattern immune to encoding issues by construction
+- `pendingNewAgents` Map removed (superseded by closures). `addRosterAgent` / `addRosterAgentEdit` replaced by `addRosterAgentDirect` / `addRosterAgentEditDirect` taking values directly. `pendingMandateUpdates` retained for `editMandateManually` post-save callback
+- A stale duplicate `results.appendChild(div)` and `});` left by the refactor caused a `ReferenceError` on page load, breaking provider switching, agent list rendering, depth selection, and synthesis model toggle. Fixed by removing the duplicate closing sequence
+
+#### Gemini 503 retry
+
+- Gemini API 503 ("service unavailable / high demand") errors were not retried — only 429 was. Added 503 to the retry loop with shorter backoff (5s / 10s) versus 429 (15s / 30s). Status message and final error text distinguish the two cases. Errors are now written into `syn-body` with a clear explanation rather than appearing as an unhandled exception
+
+#### Documentation
+
+- **METHODOLOGY.md** added to `docs/`: covers problem framing, session lifecycle, brief structure and its known limitations, generation independence, debate architecture (directionality, pair typing, critical/collaborative balance and its AI-assisted design provenance), synthesis pipeline, key design decisions, comparison with related work (Du et al., Ueda et al. SIGDIAL 2025, Perspectra), and reflection round as a fully specified planned feature (two-call design, structured state, targeted injection, meta-agent framing)
+- **GitHub Pages** enabled: tool now live at [dboocock.github.io/research-swarm](https://dboocock.github.io/research-swarm/). README updated with live URL and Getting started restructured to lead with the hosted version
+- **README**: added API key security and privacy section documenting Gemini URL query parameter behaviour and SSL inspection risk; auditable single-file design noted as a security strength for self-hosted use
+- **CONTRIBUTING.md**: reflection round entry updated to describe the two-call design; model routing updated to include reflection and generation extension as strong model calls; reverse proxy note added for institutional deployment
+
+---
+
 ## v4.5.0
 
 ### Bug fixes and provider/display refactor
