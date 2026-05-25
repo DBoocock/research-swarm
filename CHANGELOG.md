@@ -1,5 +1,49 @@
 # Changelog
 
+## v4.6.0
+
+### Reflection round (issue #5)
+
+Agents previously carried static generation outputs from round 1 across all subsequent rounds, learning nothing from debate. The reflection round adds two sequential API calls per debating agent after each debate round and before synthesis. Newly added agents and retired agents are skipped.
+
+#### Call 1 — Reflection (strong model)
+
+Each debating agent receives all debates it participated in this round — both exchanges where it critiqued and where it was critiqued — collated into a single prompt. The prompt asks for structured output using delimited `REBUTTAL TO [Name]:` sections (one per critique received), plus one paragraph per critique generated, plus a cross-exchange synthesis. Using delimited section labels makes extraction reliable rather than dependent on free-form parsing.
+
+The output is stored in `S.agentReflections[agentId].history[partnerId]` as an array of `{round, critique, rebuttal}` objects, one entry appended per debate round. Critiques are stored on the critic's record; rebuttals are stored on the critiqued agent's own record. The arrays accumulate across all rounds and are never reset between rounds.
+
+#### Call 2 — Generation extension (strong model)
+
+Each agent receives its original generation output plus the full Call 1 reflection and appends new or deepened research directions to `S.currentGen[agentId]`, labelled `--- REFLECTION-EXTENDED DIRECTIONS ---`. These are immediately visible to the compression step, synthesis, and meta-agent for the current round.
+
+#### Targeted injection before future debate calls
+
+`buildPairHistory(criticId, partnerId, partnerName)` reads both sides of the history for a given pair, merges entries by round number, sorts chronologically, and renders the full exchange history (critique → rebuttal → critique → rebuttal → ...) into the debate prompt. Only the relevant pair's history is injected; unrelated pair histories are not. New pairings receive no injection.
+
+#### Meta-agent
+
+Receives a brief supplementary summary of which agents have extended directions or pending rebuttals. Framed explicitly as supplementary context available if a pair is already warranted on theoretical grounds, not as a primary pairing driver — to avoid locking sessions into the same pairs indefinitely.
+
+#### UI toggle
+
+A **Reflection round** toggle in the sidebar (on by default) enables or disables the full two-call pipeline after each debate round. When disabled, the tool behaves exactly as before. Toggle state is included in the JSON export and restored on import.
+
+#### State changes
+
+- `S.agentReflections`: `{agentId: {history: {partnerId: [{round, critique, rebuttal}]}, learning: string}}` — accumulated across rounds, never reset between rounds; included in `saveRound()` and `buildExportData()`
+- `S.reflectionsEnabled`: boolean toggle state — included in JSON export
+
+#### Model routing
+
+- `reflection` and `genextension` roles added to `MODELS` — both use the strong model (Sonnet 4.6 / Gemini 2.5 Flash); genuine reasoning required for both
+- `MAX_TOKENS`: `reflection: 600`, `genextension: 500`
+
+#### Synthesis token limit
+
+Post-debate synthesis with reflections enabled receives progressively larger inputs as `REFLECTION-EXTENDED DIRECTIONS` accumulate in generation outputs across rounds. The standard 1,200 token ceiling was causing mid-sentence truncation in longer sessions (observed at 215 chars in a 14-round session at brief depth). A `maxTokensOverride` parameter was added to both provider `call` signatures; post-debate synthesis uses 2,000 tokens when `reflectionsEnabled` is true, falling back to 1,200 otherwise.
+
+---
+
 ## v4.5.1
 
 ### Bug fixes, robustness improvements, and documentation

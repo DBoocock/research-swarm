@@ -182,7 +182,7 @@ This is analogous to the Delphi method's first round, where panel members give i
 
 ### 4.3 Smart generation
 
-After the first round, generation only runs for **newly added agents**. Existing agents' generation outputs are preserved across rounds. This reflects a design decision about where learning happens: agents do not regenerate from scratch each round; instead, the debate round is where new information is processed. The reflection round (section 9) will partially address this limitation.
+After the first round, generation only runs for **newly added agents**. Existing agents' generation outputs are preserved across rounds. This reflects a design decision about where learning happens: agents do not regenerate from scratch each round; instead, the debate round is where new information is processed. The reflection round (section 9) addresses this limitation by appending new directions to existing generation outputs after each debate round.
 
 ---
 
@@ -225,7 +225,7 @@ flowchart LR
 **Why unidirectional rather than conversational?**
 A true multi-turn conversation between agents would require sequential execution (B cannot respond to A's debate response until A has produced it), would extend session time substantially, and would create a risk of rhetorical convergence — agents would respond to each other's *responses* rather than to each other's underlying theoretical positions. By anchoring debate to generation outputs, we ensure agents are always engaging with each other's disciplinary frameworks, not with each other's rhetorical moves.
 
-The cost of this choice is that debate responses cannot build on each other within a round. This is a genuine limitation. The reflection round (section 9) is partly motivated by the desire to give agents some memory of what was argued, even if not within-round iteration.
+The cost of this choice is that debate responses cannot build on each other within a round. This is a genuine limitation. The reflection round (section 9) addresses this by giving agents memory of what was argued across rounds, even if not within-round iteration.
 
 ### 5.3 Debate pair typing
 
@@ -272,7 +272,7 @@ Debate responses are produced once and stored. They are not:
 - Used to update any agent's generation outputs
 - Incorporated into any agent's mandate
 
-This means agents learn nothing from being debated in the current implementation. Their generation outputs remain unchanged across rounds. The reflection round (section 9) addresses this directly.
+Agents learn nothing from being debated in isolation. Their base generation outputs remain unchanged across rounds, though the reflection round (section 9) appends new directions after each debate round, making the effective generation output grow as the session progresses.
 
 ---
 
@@ -356,7 +356,7 @@ Agent mandates are not updated automatically by debate outputs. An agent that is
 **Why not automatic updating?**
 The value of the swarm comes from **maintained heterogeneity**. If mandates updated automatically in response to debate, agents would drift toward consensus over multiple rounds. After several rounds, a Bayesian modeller who repeatedly debates an evolutionary dynamicist might begin proposing evolutionary directions, losing the precise disciplinary difference that made the pairing productive in the first place. The swarm would homogenise.
 
-Stable mandates are the system's primary protection against this failure mode. The reflection round (section 9) is designed to give agents *contextual awareness* of what they have learned through debate — updating their working memory without touching their disciplinary identity.
+Stable mandates are the system's primary protection against this failure mode. The reflection round (section 9) gives agents *contextual awareness* of what they have learned through debate — updating their working memory without touching their disciplinary identity.
 
 **What is lost?**
 A real researcher does update their methodological commitments based on encounters with other frameworks. Stable mandates prevent agents from modelling this. It is a simplification that trades some realism for guaranteed diversity. Whether this trade-off is correct empirically is unknown — it would require a controlled comparison.
@@ -445,9 +445,9 @@ This is worth stating explicitly, because the choices *look* principled — and 
 
 ---
 
-## 9. The reflection round (planned)
+## 9. The reflection round
 
-*Issue #5 — not yet implemented.*
+*Implemented in v4.6.0. See issue #5 (closed).*
 
 ### 9.1 The problem being solved
 
@@ -487,12 +487,20 @@ The reflection output is stored in a structured per-agent state object:
 
 ```js
 S.agentReflections[agentId] = {
-  rebuttals: { partnerId: "rebuttal text" },          // injected to partner before next debate
-  priorCritiques: { partnerId: "full critique text" }, // injected to self before next debate
-  learning: "what generating critiques taught this agent about its own framework"
-  // learning feeds into Call 2 (generation extension) — not injected before future debates.
-  // Its value is expressed through the appended generation output, not carried forward directly.
+  history: {
+    partnerId: [
+      { round: N, critique: "full debate text", rebuttal: null },  // critic's record
+      { round: N, critique: null, rebuttal: "rebuttal text" },     // critiqued agent's record
+      // one entry appended per debate round, chronological order
+    ]
+  },
+  learning: "cross-exchange synthesis from Call 1"
 }
+```
+
+Critiques are stored on the critic's own record (keyed by the critiqued agent's id); rebuttals are stored on the critiqued agent's own record (keyed by the critic's id). `buildPairHistory()` merges both sides at read time by matching round numbers. The arrays accumulate across all rounds and are never reset between rounds.
+
+The prompt asks for structured output using delimited `REBUTTAL TO [Name]:` sections — one per critique received — so extraction is reliable rather than dependent on free-form parsing. Rebuttals are only prompted for critiques the agent received; not for critiques it generated.
 ```
 
 **Call 2 — Generation extension**
@@ -506,28 +514,41 @@ The disciplinary constraint is intentionally permissive: *"remain largely within
 ```mermaid
 flowchart TD
     subgraph "Reflection round — per debating agent"
-        C1["Call 1 — Reflection\nStrong model\nAll debates this agent was in, both sides\n→ rebuttals per partner received\n→ prior critique text per partner critiqued\n→ framework learning\n→ unlocked directions"]
+        C1["Call 1 — Reflection\nStrong model\nAll debates this agent was in, both sides\n→ REBUTTAL TO [Name]: sections per critique received\n→ framework learning per critique generated\n→ cross-exchange synthesis"]
         C2["Call 2 — Generation extension\nStrong model\nOriginal generation + reflection output\n→ new or deepened directions\n→ appended to currentGen"]
         C1 --> C2
     end
     D["Debate outputs\ncurrent round"] --> C1
     C2 --> GEN["currentGen — appended\n→ synthesis agent\n→ meta-agent"]
-    C1 --> REF["agentReflections — structured\n→ targeted injection\nbefore future debates"]
+    C1 --> REF["agentReflections — history arrays\n→ buildPairHistory() injection\nbefore future debates"]
     NA["New agent\nno prior debate"] --> SKIP["Skip reflection round\nno injection"]
 ```
 
 ### 9.4 Targeted injection before future debate calls
 
-The only reflection-derived injections before future debate calls are `priorCritiques` and `rebuttals`. Everything else agents receive on a debate call is the standard package: the brief (system prompt, cached), their mandate (system prompt, uncached), and the partner's generation output as the debate content.
+The only reflection-derived injections before future debate calls are the prior critique texts and rebuttals for the specific pair being debated. Everything else agents receive on a debate call is the standard package: the brief (system prompt, cached), their mandate (system prompt, uncached), and the partner's generation output as the debate content.
 
 **Before Agent 1 debates Agent 2 (Agent 1 is critiquing):**
-1. `S.agentReflections[agent1Id].priorCritiques[agent2Id]` — if it exists, inject: *"In a previous round you sent the following critique to [Agent 2]: '[full prior critique text]'."*
-2. `S.agentReflections[agent2Id].rebuttals[agent1Id]` — if it exists, inject: *"[Agent 2] responded to that critique: '[rebuttal text]'."*
 
-Prior critique is shown before rebuttal — the logical sequence is argument then response. `learning` is not injected before future debate calls. Its value is expressed through the appended generation output from Call 2, which Agent 1's partners already see as part of Agent 1's updated generation output. Injecting it would optimise Agent 1 as a debater, which is incidental to the debate's primary purpose — giving the best critique of the partner's framework — and would add unnecessary context window cost as it accumulates.
+`buildPairHistory(agent1Id, agent2Id, agent2Name)` is called. It reads Agent 1's history entries for Agent 2 (where `critique` is non-null) and Agent 2's history entries for Agent 1 (where `rebuttal` is non-null), merges them by round number, sorts chronologically, and renders the full exchange history:
 
-**Before Agent 3 debates Agent 2 (a new partner):**
-Inject nothing from Agent 1/2 debate history. Agent 3 should critique Agent 2's current generation output (which already includes appended directions from reflection) without being anchored to issues Agent 1 already raised.
+```
+Prior exchange history with [Agent 2] (chronological):
+
+[Round N — your critique]
+[full prior critique text]
+[Round N — Agent 2's rebuttal]
+[rebuttal text]
+
+[Round M — your critique]
+[full prior critique text]
+...
+```
+
+This means all prior rounds of exchange between the pair are visible in chronological order, not just the most recent. This prevents Agent 1 from re-raising points already argued and allows it to build on what the exchange has actually established.
+
+**Before Agent 3 debates Agent 2 (a new pairing):**
+`buildPairHistory` returns an empty string — no history exists for this pair. Agent 3 should critique Agent 2's current generation output (which already includes appended directions from reflection) without being anchored to issues Agent 1 already raised.
 
 **Call 2 (generation extension):**
 Receives the full reflection output from Call 1 including the `learning` field. This is the correct place for `learning` to have effect — it seeds new generation directions rather than shaping debating behaviour.
@@ -552,7 +573,7 @@ Does not receive reflection outputs. Already sees updated generation outputs.
 
 ### 9.6 UI toggle
 
-A UI toggle to enable/disable the reflection round is a prerequisite for empirical investigation. With reflections disabled, the tool behaves exactly as in v4.5.0. With reflections enabled, the full two-call pipeline runs after each debate round. The toggle state should be included in the JSON export so session comparisons are interpretable.
+A **Reflection round** toggle in the sidebar enables or disables the full two-call pipeline after each debate round. When disabled, the tool behaves exactly as in v4.5.1. When enabled, Call 1 and Call 2 run for all debating agents after each debate round and before synthesis. The toggle state is included in the JSON export so that sessions with and without reflections enabled are distinguishable on import.
 
 ### 9.7 Evaluation — a multi-objective problem
 
@@ -564,7 +585,7 @@ Evaluating the reflection round requires measuring two competing objectives simu
 
 The two objectives are in tension but not mutually exclusive. Genuine interdisciplinary progress will cause some convergence; the question is whether the convergence is productive (shared understanding of a real connection) or degenerative (loss of disciplinary distinctiveness). This distinction is hard to measure automatically and may ultimately require researcher judgement — which is consistent with the tool's overall design philosophy.
 
-The reflection round design is motivated by analogy with human learning in collaborative contexts, but has no specific empirical citation for multi-agent research ideation. It should be treated as a well-reasoned hypothesis pending evaluation against the v4.5.0 baseline.
+The reflection round design is motivated by analogy with human learning in collaborative contexts, but has no specific empirical citation for multi-agent research ideation. It should be treated as a well-reasoned hypothesis pending evaluation against the v4.5.1 baseline.
 
 ---
 
@@ -622,7 +643,7 @@ These handover documents could be used directly by the researcher as working not
 
 ## 13. What we do not do (and why)
 
-**On our goal.** The goal of Research Swarm is to preserve the heterogeneity of perspectives across the swarm while progressing debate to unlock new research directions — without becoming homogenised or resolving to a single answer. These are two simultaneous objectives in tension. Maintained heterogeneity enables substantive debate; progressive debate is what generates new directions. The system's design is an attempt to hold both: stable mandates protect heterogeneity, the reflection round (when implemented) enables progress, and the researcher's intervention at every round boundary is the mechanism for steering between them.
+**On our goal.** The goal of Research Swarm is to preserve the heterogeneity of perspectives across the swarm while progressing debate to unlock new research directions — without becoming homogenised or resolving to a single answer. These are two simultaneous objectives in tension. Maintained heterogeneity enables substantive debate; progressive debate is what generates new directions. The system's design is an attempt to hold both: stable mandates protect heterogeneity, the reflection round (section 9) enables progress, and the researcher's intervention at every round boundary is the mechanism for steering between them.
 
 **We do not let agents communicate freely.** Free-form multi-agent discussion is possible (and is what Perspectra does), but produces outputs that are hard to interpret and accumulate. Typed directed pairings produce structured, interpretable debate that feeds cleanly into synthesis.
 

@@ -82,6 +82,12 @@ The swarm operates as an iterative loop of generation, debate, and synthesis rou
                     └───────────┬───────────┘
                                 │
                     ┌───────────▼───────────┐
+                    │   REFLECTION ROUND    │  ← each debating agent processes
+                    │  (when enabled)       │    what it learned; appends new
+                    │                       │    directions to generation output
+                    └───────────┬───────────┘
+                                │
+                    ┌───────────▼───────────┐
                     │ POST-DEBATE SYNTHESIS │  ← same structure as above;
                     │  (arbitration agent)  │    generation outputs first
                     └───────────┬───────────┘    compressed to ~80 words
@@ -104,6 +110,8 @@ The swarm operates as an iterative loop of generation, debate, and synthesis rou
 **Generation round**: Selected agents receive the shared research brief plus their individual specialist mandate. On the first round all selected agents run; on subsequent rounds only newly added agents run — existing generation outputs are preserved. On the Anthropic path, agents run in primer-then-parallel order (the first agent alone to write the prompt cache, then the rest in parallel reading from it). On Gemini, all agents run in true parallel with no sequencing overhead.
 
 **Debate round**: Agents are assigned one or more partners whose generation output they read and respond to. Multiple pairings per agent are allowed and encouraged. Debates are batched: an agent with three partners makes one API call rather than three, with responses labelled per partner. Pairings are proposed by the meta-agent after each synthesis and reviewed by you before the debate launches.
+
+**Reflection round** (enabled by default, toggleable in the sidebar): After each debate round, each debating agent runs two sequential API calls before synthesis. Call 1 (Reflection) collates all debates the agent participated in — both where it critiqued and where it was critiqued — and produces structured output: rebuttals to critiques received and framework learning from critiques it generated. Call 2 (Generation extension) appends new or deepened research directions to the agent's existing generation output based on what it learned. The full history of prior exchanges between each pair is injected chronologically before future debate calls, so agents do not repeat arguments that have already been answered. Newly added agents that have only generated are skipped. When disabled, the tool behaves exactly as before.
 
 **Synthesis**: An arbitration agent reads all generation and debate outputs and produces a concise structured synthesis with explicit word limits per section: convergences, tensions, the single most tractable first empirical step, blind spots, tagged research directions, and a contradiction log.
 
@@ -183,7 +191,9 @@ The interface is divided into a **sidebar** (always visible) and a **main panel*
 | **Provider** | Gemini (default) or Anthropic — radio selector + key field |
 | **Session cost** | Live cost tracker with cache hit rate |
 | **Agents** | Agent list with status, edit, and delete controls |
+| **Synthesis model** | Sonnet / Opus toggle (Anthropic only) |
 | **Depth** | Brief / Detailed / Exhaustive output length |
+| **Reflection round** | Enable / disable the two-call reflection pipeline after each debate round |
 | **Run button** | Launches the generation round |
 | **Status bar** | Current operation status |
 
@@ -286,7 +296,7 @@ To create an agent with overlapping expertise (for productive debate tension), c
 
 6. **Review Next Round tab** — the meta-agent proposes debate pairings. Toggle pairs on/off, accept any status change recommendations, then click **launch debate round →**.
 
-7. **Review post-debate synthesis** — a second synthesis runs after the debate, this time with compressed generation summaries and full debate outputs.
+7. **Review post-debate synthesis** — if the reflection round is enabled (default), each debating agent first processes what it learned from debate and appends new directions to its generation output, then synthesis runs over the updated outputs. The synthesis tab shows the result.
 
 8. **Repeat** — pairings rotate each round based on meta-agent analysis of what tensions remain unresolved.
 
@@ -422,6 +432,8 @@ Different call types use different models, selectable or fixed:
 |---|---|---|---|
 | Generation | Sonnet 4.6 | 2.5 Flash | Fixed |
 | Debate | Sonnet 4.6 | 2.5 Flash | Fixed |
+| Reflection | Sonnet 4.6 | 2.5 Flash | Fixed (strong model required) |
+| Generation extension | Sonnet 4.6 | 2.5 Flash | Fixed (strong model required) |
 | Synthesis | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | **Sonnet/Opus toggle** (Anthropic only) |
 | Meta-agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
 | Roster agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
@@ -492,14 +504,14 @@ These costs are low enough that a $5/month budget covers extensive research use.
 
 **Practical session capacity by roster size:**
 
-A full round (generation + debate + synthesis + meta-agent) makes approximately 13–28 API calls depending on roster size and number of debate pairs.
+A full round (generation + debate + reflection + synthesis + meta-agent) makes approximately 15–36 API calls depending on roster size, number of debate pairs, and whether the reflection round is enabled. The table below assumes reflection is enabled (the default); disable it to revert to the pre-v4.6.0 call counts.
 
 | Roster size | Calls per full round | Rounds per day (no billing) | Rounds per day (billing enabled) |
 |---|---|---|---|
-| 3 agents | ~10 calls | ~2 | 1,000+ |
-| 5 agents | ~13 calls | ~1 | 700+ |
-| 8 agents | ~18 calls | ~1 | 500+ |
-| 10 agents | ~22 calls | 0–1 | 400+ |
+| 3 agents | ~12 calls | ~1 | 800+ |
+| 5 agents | ~17 calls | ~1 | 580+ |
+| 8 agents | ~24 calls | 0–1 | 400+ |
+| 10 agents | ~30 calls | 0–1 | 330+ |
 
 Without billing, the RPD limit is the binding constraint — a single 10-agent session can exhaust it. With billing enabled, the RPD limit is 10,000, which is effectively unlimited for research use.
 
@@ -661,9 +673,11 @@ There is no build step, no bundler, no package manager, and no server-side compo
 |---|---|---|---|---|
 | Generation (per agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
 | Debate (per responding agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
+| Reflection (per debating agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
+| Generation extension (per debating agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Sequential within agent |
 | Generation compression (batched) | **Haiku 4.5** | 2.5 Flash Lite | ✅ Cached brief | — |
 
-On the Anthropic path, agent[0] runs alone first to write the prompt cache, then all remaining agents run in `Promise.all` reading from it. On the Gemini path, all agents fire in true parallel with no delays — prompt caching is Anthropic-specific and is not used on the Gemini path.
+On the Anthropic path, agent[0] runs alone first to write the prompt cache, then all remaining agents run in `Promise.all` reading from it. On the Gemini path, all agents fire in true parallel with no delays — prompt caching is Anthropic-specific and is not used on the Gemini path. Within each agent's reflection pipeline, Call 1 (Reflection) must complete before Call 2 (Generation extension) starts — agents run in parallel with each other, but the two calls within each agent are sequential.
 | Synthesis | Sonnet 4.6 / **Opus 4.6** | Cached brief only | ✅ Cached brief |
 | Meta-agent | Sonnet 4.6 / **Opus 4.6** | Plain string | ❌ |
 | Roster agent | Sonnet 4.6 / **Opus 4.6** | Cached brief | ✅ Cached brief |
@@ -672,7 +686,7 @@ On the Anthropic path, agent[0] runs alone first to write the prompt cache, then
 
 ### Models
 
-Generation and debate use `claude-sonnet-4-6`. Synthesis, meta-agent, and roster agent use Sonnet by default, switchable to `claude-opus-4-6` via the sidebar toggle. Generation compression and mandate generation use `claude-haiku-4-5-20251001`. All model strings are defined in the `MODELS` constant and can be changed there.
+Generation, debate, reflection, and generation extension use `claude-sonnet-4-6` — these all require genuine reasoning. Synthesis, meta-agent, and roster agent use Sonnet by default, switchable to `claude-opus-4-6` via the sidebar toggle. Generation compression and mandate generation use `claude-haiku-4-5-20251001`. All model strings are defined in the `MODELS` constant and can be changed there.
 
 ---
 
