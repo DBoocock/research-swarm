@@ -798,11 +798,11 @@ const resolveModel=modelFor;
 
 // ── Anthropic provider ──────────────────────────────────
 const AnthropicProvider={
-  async call({name,role,systemBlocks,systemString,messages,onChunk,signal}){
+  async call({name,role,systemBlocks,systemString,messages,onChunk,signal,maxTokensOverride}){
     const key=S.apiKeys.anthropic||document.getElementById('api-key-anthropic').value.trim();
     if(!key)throw new Error('No Anthropic API key entered.');
     const model=modelFor(role||'generation');
-    const maxTok=MAX_TOKENS[role||'generation']||1200;
+    const maxTok=maxTokensOverride||MAX_TOKENS[role||'generation']||1200;
     const body={model,max_tokens:maxTok,stream:true,messages};
     if(systemBlocks)body.system=systemBlocks;
     else if(systemString)body.system=systemString;
@@ -840,11 +840,11 @@ const AnthropicProvider={
 // Streaming uses SSE with a different chunk format to Anthropic.
 // No prompt caching — cache_control fields are not sent on this path.
 const GeminiProvider={
-  async call({name,role,systemBlocks,systemString,messages,onChunk,signal}){
+  async call({name,role,systemBlocks,systemString,messages,onChunk,signal,maxTokensOverride}){
     const key=S.apiKeys.gemini||document.getElementById('api-key-gemini').value.trim();
     if(!key)throw new Error('No Gemini API key entered.');
     const model=modelFor(role||'generation');
-    const maxTok=MAX_TOKENS[role||'generation']||1200;
+    const maxTok=maxTokensOverride||MAX_TOKENS[role||'generation']||1200;
 
     // Convert Anthropic-style messages to Gemini contents format.
     // systemBlocks / systemString both map to system_instruction.
@@ -1633,12 +1633,18 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
 (2-3 contradictions)`;
 
     setStatus('Running synthesis...');
+    // When the reflection round is enabled, generation outputs grow each round as
+    // REFLECTION-EXTENDED DIRECTIONS are appended. This increases the compression
+    // step's output and pushes synthesis harder against its token ceiling.
+    // Use a higher limit post-debate with reflections on to avoid mid-sentence truncation.
+    const synthMaxTok=(includeDebate&&S.reflectionsEnabled)?2000:MAX_TOKENS.synthesis;
     const result=await apiStream({
       name:'synthesis',
       role:'synthesis',
       systemBlocks:briefOnlyBlock(),
       messages:[{role:'user',content:synthPrompt}],
       signal:new AbortController().signal,
+      maxTokensOverride:synthMaxTok,
       onChunk:chunk=>{
         S.currentSynthesis+=chunk;
         const el=document.getElementById('syn-body');
