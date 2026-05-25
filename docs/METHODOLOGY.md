@@ -501,7 +501,6 @@ S.agentReflections[agentId] = {
 Critiques are stored on the critic's own record (keyed by the critiqued agent's id); rebuttals are stored on the critiqued agent's own record (keyed by the critic's id). `buildPairHistory()` merges both sides at read time by matching round numbers. The arrays accumulate across all rounds and are never reset between rounds.
 
 The prompt asks for structured output using delimited `REBUTTAL TO [Name]:` sections — one per critique received — so extraction is reliable rather than dependent on free-form parsing. Rebuttals are only prompted for critiques the agent received; not for critiques it generated.
-```
 
 **Call 2 — Generation extension**
 
@@ -532,7 +531,7 @@ The only reflection-derived injections before future debate calls are the prior 
 
 `buildPairHistory(agent1Id, agent2Id, agent2Name)` is called. It reads Agent 1's history entries for Agent 2 (where `critique` is non-null) and Agent 2's history entries for Agent 1 (where `rebuttal` is non-null), merges them by round number, sorts chronologically, and renders the full exchange history:
 
-```
+```text
 Prior exchange history with [Agent 2] (chronological):
 
 [Round N — your critique]
