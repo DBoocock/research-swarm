@@ -375,6 +375,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
     </div>
   </div>
 
+  <div class="sidebar-section">
+    <div class="ss-hdr"><span>Reflection round</span></div>
+    <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11px;color:var(--text2);padding:1px 0;">
+      <input type="checkbox" id="reflection-toggle" checked
+        onchange="S.reflectionsEnabled=this.checked;setStatus(this.checked?'Reflection round enabled — agents will learn from debate.':'Reflection round disabled — tool behaves as before.');"
+        style="accent-color:var(--accent2);width:13px;height:13px;">
+      enable after debate
+    </label>
+    <div style="font-size:9px;color:var(--text3);margin-top:4px;line-height:1.4;">When on, agents process what they learned from each debate before synthesis. Adds two API calls per debating agent.</div>
+  </div>
+
   <button class="run-btn" id="run-btn" onclick="runGen()">run generation round →</button>
   <div class="sidebar-footer" id="status">Ready. Add a Gemini API key to begin (free).</div>
 </aside>
@@ -650,7 +661,10 @@ let S={
   researchMap:[], contradictions:[],
   matrix:{dt:[],db:[],st:[],sb:[]},
   overlapScores:{}, // "id1_id2" -> {static:0-1, observed:0-1|null}
-  editingAgentId:null
+  editingAgentId:null,
+  // Reflection round state — accumulated across rounds, never reset between rounds
+  agentReflections:{}, // agentId -> {history:{partnerId:[{round,critique,rebuttal}]}, learning:text}
+  reflectionsEnabled:true, // UI toggle — when false, reflection round is skipped entirely
 };
 
 let costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[]};
@@ -664,6 +678,8 @@ const MODELS={
   //              anthropic                      gemini
   generation:  {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'},
   debate:      {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'},
+  reflection:  {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // strong model — genuine reasoning required
+  genextension:{anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // strong model — genuine reasoning required
   synthesis:   {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
   meta:        {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
   roster:      {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
@@ -753,13 +769,15 @@ function renderCost(){
 
 // Max tokens per call type — synthesis produces long structured output and needs more room
 const MAX_TOKENS={
-  synthesis:  1200, // tightly constrained prompt: ~330 words structured output
-  meta:       1500,
-  roster:     3000,
-  generation: 1200,
-  debate:     1200,
-  compression: 600,
-  mandate:     600, // rewriting existing mandate, keep concise
+  synthesis:    1200, // tightly constrained prompt: ~330 words structured output
+  meta:         1500,
+  roster:       3000,
+  generation:   1200,
+  debate:       1200,
+  reflection:    600, // structured per-agent reflection output
+  genextension:  500, // appended new directions — focused, not exhaustive
+  compression:   600,
+  mandate:       600, // rewriting existing mandate, keep concise
 };
 
 function modelFor(role){
@@ -1196,7 +1214,7 @@ async function runGen(){
   S.running=true;lockTabs();
   if(isFirstRound) S.currentRound++;
   // Don't clear S.currentGen — preserve existing outputs for agents not in this run
-  if(isFirstRound){ S.currentGen={}; S.currentDebate={}; }
+  if(isFirstRound){ S.currentGen={}; S.currentDebate={}; S.agentReflections={}; }
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-gen');
   // On subsequent rounds, add new agent cards without clearing existing ones
@@ -1261,6 +1279,37 @@ async function runGen(){
 }
 
 // ══════════════════════════════════════════════════════════
+// PAIR HISTORY — builds chronological critique/rebuttal context for debate injection
+// ══════════════════════════════════════════════════════════
+// Returns a formatted string (may be empty) to prepend before a partner's generation
+// output in a debate call. Reads from S.agentReflections:
+//   - critic's own history[partnerId]: entries where critique is non-null
+//   - partner's history[criticId]:     entries where rebuttal is non-null
+// Merges by round number, chronological order, renders as critique → rebuttal pairs.
+function buildPairHistory(criticId, partnerId, partnerName){
+  const criticHistory=S.agentReflections[criticId]?.history?.[partnerId]||[];
+  const partnerHistory=S.agentReflections[partnerId]?.history?.[criticId]||[];
+
+  // Collect rounds that have at least a critique
+  const rounds=new Map();
+  criticHistory.forEach(e=>{if(e.critique!=null)rounds.set(e.round,{critique:e.critique,rebuttal:null});});
+  // Attach rebuttals from the partner's record for matching rounds
+  partnerHistory.forEach(e=>{
+    if(e.rebuttal!=null&&rounds.has(e.round))rounds.get(e.round).rebuttal=e.rebuttal;
+  });
+
+  if(!rounds.size)return '';
+
+  const sorted=[...rounds.entries()].sort((a,b)=>a[0]-b[0]);
+  let out=`Prior exchange history with ${partnerName} (chronological):\n`;
+  sorted.forEach(([round,{critique,rebuttal}])=>{
+    out+=`\n[Round ${round} — your critique]\n${critique}\n`;
+    if(rebuttal)out+=`[Round ${round} — ${partnerName}'s rebuttal]\n${rebuttal}\n`;
+  });
+  return out+'\n';
+}
+
+// ══════════════════════════════════════════════════════════
 // DEBATE ROUND — multiple pairings per agent, batched calls
 // ══════════════════════════════════════════════════════════
 async function runDebate(){
@@ -1307,7 +1356,7 @@ async function runDebate(){
         partners.forEach((p,i)=>{
           const a2=agents.find(a=>a.id===p.id);
           const out2=S.currentGen[p.id]||'(no output)';
-          userMsg+=`PARTNER ${i+1} — ${a2?.name||p.id} [${p.type}]:\n---\n${out2}\n---\n\n`;
+          userMsg+=`PARTNER ${i+1} — ${a2?.name||p.id} [${p.type}]:\n${buildPairHistory(id1,p.id,a2?.name||p.id)}---\n${out2}\n---\n\n`;
         });
         userMsg+=partners.map((p,i)=>{
           const a2=agents.find(a=>a.id===p.id);
@@ -1318,7 +1367,7 @@ async function runDebate(){
         const p=partners[0];
         const a2=agents.find(a=>a.id===p.id);
         const out2=S.currentGen[p.id]||'(no output)';
-        userMsg=`You have read the output of ${a2?.name||p.id} (below). Write a focused debate response (~${words} words): challenge assumptions, identify incompatible predictions, or show how combining both frameworks yields something neither could produce alone.\n\n${a2?.name||p.id} wrote:\n---\n${out2}\n---\n\nBe direct, technically specific, and honest about where your own framework has limits.`;
+        userMsg=`You have read the output of ${a2?.name||p.id} (below). Write a focused debate response (~${words} words): challenge assumptions, identify incompatible predictions, or show how combining both frameworks yields something neither could produce alone.\n\n${buildPairHistory(id1,p.id,a2?.name||p.id)}${a2?.name||p.id} wrote:\n---\n${out2}\n---\n\nBe direct, technically specific, and honest about where your own framework has limits.`;
       }
       let streaming='';
       return apiStream({
@@ -1357,6 +1406,11 @@ async function runDebate(){
     setStatus(`Debate — ${debateEntries.length} pair${debateEntries.length>1?'s':''} running...`);
     await callParallel(debateEntries.map(e=>()=>makeDebateCall(e)));
     updateRoundHdr(hdr,'done');tc('deb',activePairs.length);
+    // Reflection round — runs after debate, before synthesis, if enabled
+    if(S.reflectionsEnabled){
+      setStatus('Debate complete. Running reflection round...');
+      await runReflectionRound(activePairs);
+    }
     setStatus('Debate complete. Running synthesis...');
     await runSynthesis(true);
   }catch(e){if(e.name!=='AbortError')setStatus('Debate error: '+e.message);}
@@ -1365,8 +1419,156 @@ async function runDebate(){
 }
 
 // ══════════════════════════════════════════════════════════
-// SYNTHESIS — two-stage compression for post-debate runs
+// REFLECTION ROUND — two sequential calls per debating agent
 // ══════════════════════════════════════════════════════════
+// Call 1 (Reflection): agent receives all debates it participated in this round,
+// produces structured output: rebuttals to critiques received, prior critique text
+// for anti-repetition memory, and framework learning from critiques it generated.
+// Call 2 (Generation extension): agent receives its original generation + Call 1 output
+// and appends new/deepened research directions to S.currentGen[agentId].
+//
+// Agents run in parallel with each other; within each agent the two calls are sequential.
+// Only agents that participated in debate (on either side) receive reflection calls.
+// Retired agents are filtered out, same as other round types.
+async function runReflectionRound(activePairs){
+  // Collect agents that participated in debate this round (either as id1 or id2),
+  // filtering retired agents.
+  const debatingAgentIds=new Set();
+  activePairs.forEach(p=>{
+    if(S.agentStatuses[p.id1]!=='retired')debatingAgentIds.add(p.id1);
+    if(S.agentStatuses[p.id2]!=='retired')debatingAgentIds.add(p.id2);
+  });
+  const debatingAgents=agents.filter(a=>debatingAgentIds.has(a.id)&&S.currentGen[a.id]);
+  if(!debatingAgents.length)return;
+
+  setStatus(`Reflection — ${debatingAgents.length} agent${debatingAgents.length>1?'s':''} processing debate outputs...`);
+
+  // Build per-agent pipeline: Call 1 (reflection) then Call 2 (generation extension)
+  const makeAgentReflection=agent=>{
+    const agentId=agent.id;
+
+    // Collate all debates this agent participated in this round
+    // Debates where agent was the critic (id1): agentId_partnerId
+    // Debates where agent was critiqued (id2): partnerId_agentId
+    const critiquesGenerated=[];   // debates where this agent was id1 (the critic)
+    const critiquesReceived=[];    // debates where this agent was id2 (the critiqued)
+    activePairs.forEach(p=>{
+      const key=p.id1+'_'+p.id2;
+      const debateText=S.currentDebate[key];
+      if(!debateText)return;
+      const partnerName=agentId===p.id1
+        ?agents.find(a=>a.id===p.id2)?.name||p.id2
+        :agents.find(a=>a.id===p.id1)?.name||p.id1;
+      if(p.id1===agentId){
+        critiquesGenerated.push({partnerId:p.id2,partnerName,debateText});
+      } else if(p.id2===agentId){
+        critiquesReceived.push({partnerId:p.id1,partnerName,debateText});
+      }
+    });
+
+    if(!critiquesGenerated.length&&!critiquesReceived.length)return Promise.resolve();
+
+    // ── Call 1: Reflection ───────────────────────────────
+    let reflectionSection='';
+    if(critiquesReceived.length){
+      reflectionSection+='CRITIQUES YOU RECEIVED THIS ROUND:\n';
+      critiquesReceived.forEach(({partnerName,debateText})=>{
+        reflectionSection+=`\nFrom ${partnerName}:\n---\n${debateText}\n---\n`;
+      });
+    }
+    if(critiquesGenerated.length){
+      reflectionSection+='\nCRITIQUES YOU GENERATED THIS ROUND:\n';
+      critiquesGenerated.forEach(({partnerName,debateText})=>{
+        reflectionSection+=`\nTo ${partnerName}:\n---\n${debateText}\n---\n`;
+      });
+    }
+
+    // Prompt asks for delimited REBUTTAL TO [Name]: sections so extraction is reliable.
+    // Rebuttals are only expected for critiques received — one section per critic.
+    const rebuttalInstructions=critiquesReceived.length
+      ? critiquesReceived.map(({partnerName})=>
+          `REBUTTAL TO ${partnerName}: [your substantive rebuttal in 2-4 sentences — what you concede, what you contest, and why]`
+        ).join('\n')
+      : '';
+
+    const reflectionPrompt=`You have just completed a debate round. Review all your debate exchanges below and reflect on what you have learned.\n\n${reflectionSection}\n\nProvide structured reflection using these exact section labels:\n\n${rebuttalInstructions?rebuttalInstructions+'\n\n':''}FOR EACH CRITIQUE YOU GENERATED: Did studying the partner\'s framework reveal anything that advances your own directions? (One paragraph per partner, labelled "CRITIQUE TO [name]:")\n\nACROSS ALL EXCHANGES: Are there new or deepened research directions unlocked by the combination of insights from this round?`;
+
+    return apiStream({
+      name:`reflect:${agent.name.slice(0,14)}`,
+      role:'reflection',
+      systemBlocks:agentSystemBlocks(agent.mandate),
+      messages:[{role:'user',content:reflectionPrompt}],
+      signal:new AbortController().signal,
+      onChunk:()=>{}
+    }).then(reflectionOutput=>{
+      // Initialise agent reflection record if first round
+      if(!S.agentReflections[agentId]){
+        S.agentReflections[agentId]={history:{},learning:''};
+      }
+      // history[partnerId] is an array of {round, critique, rebuttal} objects,
+      // one entry appended per debate round. Chronological order is insertion order.
+
+      // Extract delimited rebuttals — "REBUTTAL TO [Name]:" sections
+      const extractedRebuttals={};
+      critiquesReceived.forEach(({partnerId,partnerName})=>{
+        const escaped=partnerName.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+        const regex=new RegExp(`REBUTTAL TO ${escaped}:\\s*([\\s\\S]*?)(?=REBUTTAL TO |FOR EACH CRITIQUE|ACROSS ALL|$)`,'i');
+        const m=reflectionOutput.match(regex);
+        extractedRebuttals[partnerId]=m?m[1].trim().slice(0,600):'';
+      });
+
+      // Append this round's exchange to history for each partner.
+      // critiquesGenerated: this agent was the critic — store critique text, no rebuttal yet
+      critiquesGenerated.forEach(({partnerId,debateText})=>{
+        if(!S.agentReflections[agentId].history[partnerId])
+          S.agentReflections[agentId].history[partnerId]=[];
+        S.agentReflections[agentId].history[partnerId].push({
+          round:S.currentRound,
+          critique:debateText,
+          rebuttal:null  // rebuttals are stored on the critiqued agent's record, retrieved by buildPairHistory
+        });
+      });
+      // critiquesReceived: this agent was critiqued — attach rebuttal to the critic's history entry.
+      // The critic's history array (keyed on this agent's id, stored on the critic's record)
+      // may not exist yet if the critic hasn't reflected; store rebuttal on this agent's own
+      // record keyed by the critic's id so the critic can retrieve it at injection time.
+      critiquesReceived.forEach(({partnerId})=>{
+        if(!S.agentReflections[agentId].history[partnerId])
+          S.agentReflections[agentId].history[partnerId]=[];
+        S.agentReflections[agentId].history[partnerId].push({
+          round:S.currentRound,
+          critique:null,  // the critique lives on the critic's own record
+          rebuttal:extractedRebuttals[partnerId]||''
+        });
+      });
+
+      // Store learning from cross-exchange synthesis
+      const acrossMatch=reflectionOutput.match(/ACROSS ALL EXCHANGES[:\s]*([^]*?)$/i);
+      S.agentReflections[agentId].learning=acrossMatch?acrossMatch[1].trim():reflectionOutput.slice(-400);
+
+      // ── Call 2: Generation extension ────────────────────
+      const genExtPrompt=`You have just reflected on your debate exchanges this round. Based on what you learned, extend your research directions.\n\nYOUR ORIGINAL GENERATION OUTPUT:\n---\n${S.currentGen[agentId]||'(none)'}\n---\n\nYOUR REFLECTION:\n---\n${reflectionOutput}\n---\n\nAppend new or deepened research directions that were not in your original output. Remain largely within your disciplinary framework, or at least draw heavily on your disciplinary framework if the direction is genuinely interdisciplinary. Be specific and technically rigorous. Label this section clearly:\n\n--- REFLECTION-EXTENDED DIRECTIONS ---\n[your new directions here]`;
+
+      return apiStream({
+        name:`genext:${agent.name.slice(0,14)}`,
+        role:'genextension',
+        systemBlocks:agentSystemBlocks(agent.mandate),
+        messages:[{role:'user',content:genExtPrompt}],
+        signal:new AbortController().signal,
+        onChunk:()=>{}
+      }).then(extensionOutput=>{
+        // Append to S.currentGen — immediately visible to synthesis and meta-agent
+        S.currentGen[agentId]=(S.currentGen[agentId]||'')+'\n\n'+extensionOutput.trim();
+      });
+    });
+  };
+
+  // callParallel: agents run in parallel; within each agent the two calls are sequential
+  // (makeAgentReflection already chains Call 1 → Call 2 in the same async closure).
+  await callParallel(debatingAgents.map(a=>()=>makeAgentReflection(a)));
+}
+
+
 async function runSynthesis(includeDebate){
   const panel=document.getElementById('panel-syn');panel.innerHTML='';
   const hdr=makeRoundHdr('Synthesis','running');panel.appendChild(hdr);switchTab('syn');
@@ -1514,14 +1716,40 @@ async function runMeta(synthesisText){
     return;
   }
   const agentList=active.map(a=>`- ${a.name} (id: ${a.id}, status: ${S.agentStatuses[a.id]||'active'})`).join('\n');
+
+  // Build a brief reflection summary for the meta-agent.
+  // Rebuttal context is supplementary — pairing decisions should be driven by unexplored
+  // theoretical territory, not by pending rebuttals alone (which risks locking sessions
+  // into the same pairs indefinitely). Frame rebuttals as available context if a pair
+  // is selected for other reasons, not as a primary pairing driver.
+  let reflectionContext='';
+  if(S.reflectionsEnabled&&Object.keys(S.agentReflections).length){
+    const lines=[];
+    Object.entries(S.agentReflections).forEach(([agentId,ref])=>{
+      const agentName=agents.find(a=>a.id===agentId)?.name||agentId;
+      const history=ref.history||{};
+      const partnerIdsWithRebuttals=Object.entries(history)
+        .filter(([,entries])=>entries.some(e=>e.rebuttal))
+        .map(([pid])=>agents.find(a=>a.id===pid)?.name||pid);
+      const hasRebuttals=partnerIdsWithRebuttals.length>0;
+      const hasExtensions=S.currentGen[agentId]&&S.currentGen[agentId].includes('REFLECTION-EXTENDED DIRECTIONS');
+      if(hasRebuttals||hasExtensions){
+        lines.push(`- ${agentName}${hasExtensions?' has appended new reflection-extended directions':''}${hasRebuttals?'; has pending rebuttals to: '+partnerIdsWithRebuttals.join(', '):''}`);
+      }
+    });
+    if(lines.length){
+      reflectionContext=`\nReflection context (supplementary — use only if a pair is already warranted on theoretical grounds):\n${lines.join('\n')}\n`;
+    }
+  }
+
   const metaPrompt=`You are a meta-agent directing a research swarm. Synthesis:
 
 ${synthesisText}
 
 Active agents:
 ${agentList}
-
-Propose debate pairings. IMPORTANT: agents may have MULTIPLE pairings — assign as many as are genuinely productive. There is no one-partner limit.
+${reflectionContext}
+Propose debate pairings. IMPORTANT: agents may have MULTIPLE pairings — assign as many as are genuinely productive. There is no one-partner limit. Pairing decisions should be driven by whether new theoretical territory remains to explore, not by pending rebuttals.
 
 For each pair (exact format):
 PAIR: [id1] | [id2] | [type] | [one-sentence justification]
@@ -2037,7 +2265,7 @@ function renderOverlapMatrix(){
 // ══════════════════════════════════════════════════════════
 // SESSION LOG + EXPORT
 // ══════════════════════════════════════════════════════════
-function saveRound(){
+function saveRound(includeDebate){
   // Use S.rounds.length+1 as the sequence number so each saved record gets a
   // unique incrementing label regardless of how many synthesis calls happen
   // per generation round (generation synthesis + debate synthesis both call
@@ -2047,7 +2275,8 @@ function saveRound(){
     round:seqNum,ts:new Date().toISOString(),depth:S.depth,
     generationOutputs:{...S.currentGen},debateOutputs:{...S.currentDebate},
     synthesis:S.currentSynthesis,pairingProposals:[...S.pairingProposals],
-    retirementProposals:[...S.retirementProposals]
+    retirementProposals:[...S.retirementProposals],
+    agentReflections:JSON.parse(JSON.stringify(S.agentReflections))
   });
   renderLog();tc('log',S.rounds.length);
 }
@@ -2102,10 +2331,12 @@ function setLastExport(fname,type){
 
 function buildExportData(){
   return{exportTime:new Date().toISOString(),provider:S.provider||'gemini',brief,
+    reflectionsEnabled:S.reflectionsEnabled,
     agentMandates:Object.fromEntries(agents.map(a=>[a.id,{name:a.name,color:a.color,mandate:a.mandate,status:S.agentStatuses[a.id]||'active'}])),
     sessionCost:{total:costS.total,saved:costS.saved,inputTok:costS.inp,outputTok:costS.out,cacheReads:costS.cr,cacheWrites:costS.cw},
     rounds:S.rounds,researchMap:S.researchMap,contradictions:S.contradictions,
-    matrix:S.matrix,overlapScores:S.overlapScores};
+    matrix:S.matrix,overlapScores:S.overlapScores,
+    agentReflections:S.agentReflections};
 }
 
 function buildMd(){
@@ -2204,6 +2435,12 @@ function importSession(event){
       if(data.contradictions)S.contradictions=[...data.contradictions];
       if(data.matrix)S.matrix={...data.matrix};
       if(data.overlapScores)S.overlapScores={...data.overlapScores};
+      if(data.agentReflections)S.agentReflections={...data.agentReflections};
+      if(typeof data.reflectionsEnabled==='boolean'){
+        S.reflectionsEnabled=data.reflectionsEnabled;
+        const tog=document.getElementById('reflection-toggle');
+        if(tog)tog.checked=S.reflectionsEnabled;
+      }
       // Restore round counter
       if(data.rounds&&data.rounds.length)S.currentRound=Math.max(...data.rounds.map(r=>r.round));
       // Rebuild all panels
