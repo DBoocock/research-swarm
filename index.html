@@ -1317,6 +1317,7 @@ async function runDebate(){
   const activePairs=S.pairingProposals.filter(p=>p.enabled);
   if(!activePairs.length){setStatus('No pairs enabled.');return;}
   S.running=true;lockTabs();S.currentDebate={};
+  S.currentRound++; // increment here — debate rounds are the primary round boundary
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-deb');panel.innerHTML='';
   const hdr=makeRoundHdr(`Round ${S.currentRound} — Debate`,'running');
@@ -1723,28 +1724,31 @@ async function runMeta(synthesisText){
   }
   const agentList=active.map(a=>`- ${a.name} (id: ${a.id}, status: ${S.agentStatuses[a.id]||'active'})`).join('\n');
 
-  // Build a brief reflection summary for the meta-agent.
+  // Build a per-agent reflection summary for the meta-agent covering this round only.
+  // Report the learning text from this round's reflection — what new territory each agent
+  // has identified — rather than the cumulative presence of extensions, which is true of
+  // all agents from round 2 onwards and becomes uninformative. The meta-agent uses this
+  // to judge whether new theoretical territory genuinely remains to explore.
   // Rebuttal context is supplementary — pairing decisions should be driven by unexplored
-  // theoretical territory, not by pending rebuttals alone (which risks locking sessions
-  // into the same pairs indefinitely). Frame rebuttals as available context if a pair
-  // is selected for other reasons, not as a primary pairing driver.
+  // theoretical territory, not by pending rebuttals alone.
   let reflectionContext='';
   if(S.reflectionsEnabled&&Object.keys(S.agentReflections).length){
     const lines=[];
     Object.entries(S.agentReflections).forEach(([agentId,ref])=>{
       const agentName=agents.find(a=>a.id===agentId)?.name||agentId;
+      const learning=(ref.learning||'').trim();
       const history=ref.history||{};
       const partnerIdsWithRebuttals=Object.entries(history)
-        .filter(([,entries])=>entries.some(e=>e.rebuttal))
+        .filter(([,entries])=>entries.some(e=>e.rebuttal&&e.round===S.currentRound))
         .map(([pid])=>agents.find(a=>a.id===pid)?.name||pid);
       const hasRebuttals=partnerIdsWithRebuttals.length>0;
-      const hasExtensions=S.currentGen[agentId]&&S.currentGen[agentId].includes('REFLECTION-EXTENDED DIRECTIONS');
-      if(hasRebuttals||hasExtensions){
-        lines.push(`- ${agentName}${hasExtensions?' has appended new reflection-extended directions':''}${hasRebuttals?'; has pending rebuttals to: '+partnerIdsWithRebuttals.join(', '):''}`);
-      }
+      if(learning){
+        // Truncate learning to ~200 chars to keep meta-agent prompt bounded
+        const learningSnippet=learning.length>200?learning.slice(0,200)+'…':learning;
+        lines.push(`- ${agentName} — new directions this round: "${learningSnippet}"${hasRebuttals?'; rebuttal available from: '+partnerIdsWithRebuttals.join(', '):''}`);}
     });
     if(lines.length){
-      reflectionContext=`\nReflection context (supplementary — use only if a pair is already warranted on theoretical grounds):\n${lines.join('\n')}\n`;
+      reflectionContext=`\nWhat agents learned this round (use to judge whether new theoretical territory remains):\n${lines.join('\n')}\n`;
     }
   }
 
