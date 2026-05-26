@@ -12,7 +12,7 @@ The tool is built on the well-established multi-agent debate framework and is no
 
 ---
 
-**Live:** [dboocock.github.io/research-swarm](https://dboocock.github.io/research-swarm/) — open in your browser, add an API key, and run immediately. No installation required.
+**Live:** [dboocock.github.io/research-swarm](https://dboocock.github.io/research-swarm/) — open in your browser, add an API key, and run immediately. No installation required. To explore without an API key, import the [example session](https://github.com/DBoocock/research-swarm/raw/main/examples/grade-dynamics-4agents-brief-R31.json) (Session log tab → Import).
 
 ---
 
@@ -133,6 +133,8 @@ This cycle repeats. Research directions, contradictions, and matrix entries accu
 ### Quickstart — hosted version
 
 Visit **[dboocock.github.io/research-swarm](https://dboocock.github.io/research-swarm/)**, select your API provider in the sidebar, enter your key, and you're ready to run. No installation, no download.
+
+To explore a mature session without any API cost, import the [example session](https://github.com/DBoocock/research-swarm/raw/main/examples/grade-dynamics-4agents-brief-R31.json) (Session log tab → Import).
 
 ### Local installation
 
