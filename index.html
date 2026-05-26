@@ -1688,6 +1688,16 @@ async function compressGenerationOutputs(){
 
   const prompt=`Summarise each agent's output below in approximately 80 words each, preserving the key technical claims and proposed methods. Use the format:\nSUMMARY [agent name]: [summary text]\n\nOutputs:\n${agentBlocks}`;
 
+  // Scale max output tokens with roster size: ~200 tokens per agent gives comfortable
+  // headroom over the 80-word (~110 token) target to account for model verbosity variation.
+  // When reflections are enabled, generation outputs grow across rounds as extensions
+  // accumulate, but the compression output length scales with agent count not input length
+  // (the model is distilling, not echoing). The floor of MAX_TOKENS.compression preserves
+  // existing behaviour for small rosters without reflections.
+  const compressionMaxTok=S.reflectionsEnabled
+    ? Math.max(MAX_TOKENS.compression, entries.length*200)
+    : MAX_TOKENS.compression;
+
   let raw='';
   await apiStream({
     name:'gen-compress',
@@ -1695,6 +1705,7 @@ async function compressGenerationOutputs(){
     systemBlocks:briefOnlyBlock(),
     messages:[{role:'user',content:prompt}],
     signal:new AbortController().signal,
+    maxTokensOverride:compressionMaxTok,
     onChunk:c=>{raw+=c;}
   });
 
