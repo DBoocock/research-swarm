@@ -8,7 +8,7 @@ The tool is built on the well-established multi-agent debate framework and is no
 
 ---
 
-> **Running Research Swarm is inexpensive.** The default provider is Google Gemini with billing enabled. A small session with 3–5 agents costs roughly $0.01–0.03; a full 10-agent detailed session around $0.20–0.40. The free tier (no billing required) works for initial exploration but has a tight daily request limit. See [Gemini billing setup](#gemini-billing-setup) for the full picture.
+> **Running Research Swarm is inexpensive.** The default provider is Google Gemini with billing enabled. A small session with 3–5 agents costs roughly $0.02–0.05; a full 10-agent detailed session around $0.30–0.60 with the reflection round enabled. The free tier (no billing required) works for initial exploration but has a tight daily request limit. See [Gemini billing setup](#gemini-billing-setup) for the full picture.
 
 ---
 
@@ -172,7 +172,7 @@ Gemini 2.5 Flash is available on a free tier with a daily request quota. For reg
 
 1. Go to [console.anthropic.com](https://console.anthropic.com) and create an account
 2. Navigate to **API Keys** and create a new key
-3. Add a payment method and a small credit balance — a typical round (generation + debate + synthesis, 10 agents, detailed depth) costs $0.15–0.20; the first round of a session is ~$0.25 due to the cache write. A four-round session costs approximately $0.50–0.65
+3. Add a payment method and a small credit balance — a typical round (generation + debate + reflection + synthesis, 10 agents, detailed depth) costs $0.25–0.35 with the reflection round enabled; the first round of a session is ~$0.35 due to the cache write. A four-round session costs approximately $0.80–1.20 with reflections enabled
 4. Select **Anthropic** in the provider section and paste the key — your browser's password manager can save it
 
 > **Note**: The Anthropic API is billed separately from a Claude.ai Pro subscription. Both providers are available simultaneously in the sidebar; you can switch between them at any time.
@@ -496,11 +496,11 @@ Adding a billing method to your Google AI Studio account unlocks much higher rat
 
 | Roster size | Depth | Typical session cost |
 |---|---|---|
-| 3–5 agents | brief | ~$0.01–0.03 |
-| 5–8 agents | detailed | ~$0.05–0.15 |
-| 10 agents | detailed, 5+ rounds | ~$0.20–0.40 |
+| 3–5 agents | brief | ~$0.02–0.05 |
+| 5–8 agents | detailed | ~$0.10–0.25 |
+| 10 agents | detailed, 5+ rounds | ~$0.30–0.60 |
 
-These costs are low enough that a $5/month budget covers extensive research use. Compression and mandate-rewriting tasks use Gemini 2.5 Flash Lite ($0.10/$0.40 per million tokens) rather than Flash ($0.30/$2.50), reducing costs for those calls by ~70%.
+These costs reflect the reflection round being enabled (the default from v4.6.0). Disabling the reflection round via the sidebar toggle roughly halves the per-round cost by eliminating the two additional API calls per debating agent. Note that with reflections enabled, per-round input token costs grow across a session as generation outputs accumulate — this will improve once issue #16 (incremental compression) is implemented.
 
 **Practical session capacity by roster size:**
 
@@ -527,6 +527,17 @@ Without billing, the RPD limit is the binding constraint — a single 10-agent s
 ---
 
 ## Saving and exporting
+
+### Example session
+
+An example session export is available in `examples/grade-dynamics-4agents-brief-R31.json` — a
+31-round session on climbing grade dynamics with 4 agents at brief depth, with the
+reflection round enabled throughout. It can be imported directly into the tool (Session
+log tab → Import) to explore what a mature session looks like without incurring any API
+cost. The session costs $1.64 in total and contains 136 research map entries across four
+depth/tractability categories. It is also used as a reference fixture for development
+work on issues [#11](https://github.com/DBoocock/research-swarm/issues/11) and
+[#14](https://github.com/DBoocock/research-swarm/issues/14).
 
 To avoid losing work mid-session — particularly given API calls cost money — the tool exports automatically and frequently. A full session can be restored from a previously exported JSON file even after the browser tab is closed.
 

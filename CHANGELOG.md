@@ -1,5 +1,50 @@
 # Changelog
 
+## v4.6.1
+
+### Bug fixes — reflection round post-release issues
+
+#### `S.currentRound` not incrementing after round 1
+
+`S.currentRound` was only incremented in the `isFirstRound` branch of `runGen()`, leaving
+it permanently at `1` after the first generation round. All history entries in
+`S.agentReflections` were therefore stored with `round: 1` regardless of when they were
+created, breaking the chronological ordering in `buildPairHistory()` and the per-round
+rebuttal filtering in the meta-agent reflection context.
+
+Fixed by moving the increment to the top of `runDebate()`, where the round boundary
+actually occurs.
+
+#### Reflection context uninformative — premature stagnation
+
+The meta-agent reflection context was flagging all agents with "has appended new
+reflection-extended directions" — a condition permanently true for all agents from round 2
+onwards. This gave the meta-agent no signal about whether new territory was uncovered this
+round, and contributed to premature stagnation (observed: zero pairings proposed after 5
+rounds with 4 agents at detailed depth).
+
+Fixed by replacing the presence flag with the `learning` text from the current round's
+reflection, truncated to 200 chars. The meta-agent now receives what each agent actually
+identified as new theoretical territory this round — the correct input for judging whether
+further debate pairings are warranted.
+
+#### Compression output truncation with reflections enabled
+
+The compression step batched all active agents into a single call capped at
+`MAX_TOKENS.compression` (600). With reflections enabled, generation outputs grow each
+round as `REFLECTION-EXTENDED DIRECTIONS` blocks accumulate. At 4 agents the compression
+model needs ~320 words of output minimum, leaving no headroom once outputs grow — causing
+mid-response truncation. Truncated compression output fed incomplete agent summaries into
+synthesis, which in turn produced truncated synthesis output (observed: 125-char synthesis
+and zero pairings proposed in round 2 at brief depth with 4 agents).
+
+Fixed by scaling `compressionMaxTok` dynamically with roster size when reflections are
+enabled: `max(600, entries.length * 200)` — 200 tokens per active agent gives comfortable
+headroom over the 80-word (~110 token) target. Falls back to `MAX_TOKENS.compression`
+when reflections are disabled.
+
+---
+
 ## v4.6.0
 
 ### Reflection round (issue #5)
