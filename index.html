@@ -1353,15 +1353,14 @@ async function runDebate(){
       const isBatched=partners.length>1;
       let userMsg;
       if(isBatched){
-        userMsg=`You have ${partners.length} debate partners this round. For each, write a focused response of approximately ${words} words, labelled exactly as shown.\n\n`;
+        userMsg=`You have ${partners.length} debate partners this round. For each, write a focused response of approximately ${words} words in the section provided.\n\n`;
         partners.forEach((p,i)=>{
           const a2=agents.find(a=>a.id===p.id);
           const out2=S.currentGen[p.id]||'(no output)';
           userMsg+=`PARTNER ${i+1} — ${a2?.name||p.id} [${p.type}]:\n${buildPairHistory(id1,p.id,a2?.name||p.id)}---\n${out2}\n---\n\n`;
         });
-        userMsg+=partners.map((p,i)=>{
-          const a2=agents.find(a=>a.id===p.id);
-          return `RESPONSE TO ${a2?.name||p.id}: [your ${words}-word response here]`;
+        userMsg+=partners.map((_p,i)=>{
+          return `===RESPONSE_${i}===\n[your ${words}-word response here]`;
         }).join('\n\n');
         userMsg+='\n\nChallenge assumptions, identify incompatible predictions, or show how combining frameworks yields something neither could produce alone. Be direct and technically specific.';
       } else {
@@ -1386,12 +1385,9 @@ async function runDebate(){
         }
       }).then(result=>{
         if(isBatched){
-          partners.forEach(p=>{
-            const a2=agents.find(a=>a.id===p.id);
-            const label=`RESPONSE TO ${a2?.name||p.id}`;
-            const regex=new RegExp(label+'\\s*:\\s*([\\s\\S]*?)(?=RESPONSE TO |$)','i');
-            const match=result.match(regex);
-            const chunk=match?match[1].trim():result;
+          const parts=result.split(/===RESPONSE_\d+===/);
+          partners.forEach((p,i)=>{
+            const chunk=parts[i+1]?.trim()||result;
             S.currentDebate[id1+'_'+p.id]=chunk;
             if(pairBodyEls[id1+'_'+p.id])pairBodyEls[id1+'_'+p.id].innerHTML=chunk;
           });
