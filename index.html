@@ -1351,17 +1351,22 @@ async function runDebate(){
       const a1=agents.find(a=>a.id===id1);
       if(!a1)return Promise.resolve();
       const isBatched=partners.length>1;
+      // Build delimiters from the partners array — single source of truth used by
+      // both the prompt template and the parser. Code owns the delimiters; the model
+      // fills in between them. indexOf matching avoids regex escaping entirely.
+      const delimiters=partners.map(p=>{
+        const a2=agents.find(a=>a.id===p.id);
+        return `RESPONSE TO ${a2?.name||p.id}:`;
+      });
       let userMsg;
       if(isBatched){
-        userMsg=`You have ${partners.length} debate partners this round. Write a focused response of approximately ${words} words for each partner. Your output must contain only the delimiters and response text shown below — do not add any titles, labels, or headers of your own.\n\n`;
+        userMsg=`You have ${partners.length} debate partners this round. For each, write a focused response of approximately ${words} words in the section provided. Do not add any headers or labels of your own.\n\n`;
         partners.forEach((p,i)=>{
           const a2=agents.find(a=>a.id===p.id);
           const out2=S.currentGen[p.id]||'(no output)';
           userMsg+=`PARTNER ${i+1} — ${a2?.name||p.id} [${p.type}]:\n${buildPairHistory(id1,p.id,a2?.name||p.id)}---\n${out2}\n---\n\n`;
         });
-        userMsg+=partners.map((_p,i)=>{
-          return `===RESPONSE_${i}===\n[your ${words}-word response here]`;
-        }).join('\n\n');
+        userMsg+=delimiters.map((d,i)=>`${d} [your ${words}-word response here]`).join('\n\n');
         userMsg+='\n\nChallenge assumptions, identify incompatible predictions, or show how combining frameworks yields something neither could produce alone. Be direct and technically specific.';
       } else {
         const p=partners[0];
@@ -1379,10 +1384,13 @@ async function runDebate(){
         onChunk:chunk=>{
           streaming+=chunk;
           if(isBatched){
-            const parts=streaming.split(/===RESPONSE_\d+===/);
+            // Route each segment to the correct partner card as chunks arrive
             partners.forEach((p,i)=>{
               const key=id1+'_'+p.id;
-              const slice=(parts[i+1]||'').replace(/={1,3}$/, '').trim();
+              const start=streaming.indexOf(delimiters[i]);
+              const rawEnd=i+1<delimiters.length?streaming.indexOf(delimiters[i+1]):streaming.length;
+              const end=rawEnd===-1?streaming.length:rawEnd;
+              const slice=start!==-1?streaming.slice(start+delimiters[i].length,end).trim():'';
               if(pairBodyEls[key])pairBodyEls[key].innerHTML=slice+'<span class="cursor"></span>';
             });
           } else {
@@ -1392,9 +1400,12 @@ async function runDebate(){
         }
       }).then(result=>{
         if(isBatched){
-          const parts=result.split(/===RESPONSE_\d+===/);
+          // Parse using the same delimiters used in the prompt — indexOf, no regex
           partners.forEach((p,i)=>{
-            const chunk=(parts[i+1]||result).replace(/={1,3}$/, '').trim();
+            const start=result.indexOf(delimiters[i]);
+            const rawEnd=i+1<delimiters.length?result.indexOf(delimiters[i+1]):result.length;
+            const end=rawEnd===-1?result.length:rawEnd;
+            const chunk=start!==-1?result.slice(start+delimiters[i].length,end).trim():result;
             S.currentDebate[id1+'_'+p.id]=chunk;
             if(pairBodyEls[id1+'_'+p.id])pairBodyEls[id1+'_'+p.id].innerHTML=chunk;
           });
