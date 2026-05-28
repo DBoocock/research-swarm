@@ -1548,7 +1548,7 @@ async function runReflectionRound(activePairs){
       S.agentReflections[agentId].learning=acrossMatch?acrossMatch[1].trim():reflectionOutput.slice(-400);
 
       // ── Call 2: Generation extension ────────────────────
-      const genExtPrompt=`You have just reflected on your debate exchanges this round. Based on what you learned, extend your research directions.\n\nYOUR ORIGINAL GENERATION OUTPUT:\n---\n${S.currentGen[agentId]||'(none)'}\n---\n\nYOUR REFLECTION:\n---\n${reflectionOutput}\n---\n\nAppend new or deepened research directions that were not in your original output. Remain largely within your disciplinary framework, or at least draw heavily on your disciplinary framework if the direction is genuinely interdisciplinary. Be specific and technically rigorous. Label this section clearly:\n\n--- REFLECTION-EXTENDED DIRECTIONS ---\n[your new directions here]`;
+      const genExtPrompt=`You have just reflected on your debate exchanges this round. Based on what you learned, extend your research directions.\n\nYOUR RESEARCH OUTPUT (all rounds, chronological — later sections are more recent):\n---\n${S.currentGen[agentId]||'(none)'}\n---\n\nYOUR REFLECTION:\n---\n${reflectionOutput}\n---\n\nAppend new or deepened research directions that were not in your prior output. Remain largely within your disciplinary framework, or at least draw heavily on your disciplinary framework if the direction is genuinely interdisciplinary. Be specific and technically rigorous. Begin your response directly with your new directions.`;
 
       return apiStream({
         name:`genext:${agent.name.slice(0,14)}`,
@@ -1558,8 +1558,11 @@ async function runReflectionRound(activePairs){
         signal:new AbortController().signal,
         onChunk:()=>{}
       }).then(extensionOutput=>{
-        // Append to S.currentGen — immediately visible to synthesis and meta-agent
-        S.currentGen[agentId]=(S.currentGen[agentId]||'')+'\n\n'+extensionOutput.trim();
+        // Prepend a round-stamped header and append to S.currentGen —
+        // immediately visible to synthesis and meta-agent.
+        // Label ownership lives here, not in the model prompt.
+        const block=`--- REFLECTION-EXTENDED DIRECTIONS (round ${S.currentRound}) ---\n${extensionOutput.trim()}`;
+        S.currentGen[agentId]=(S.currentGen[agentId]||'')+'\n\n'+block;
       });
     });
   };
