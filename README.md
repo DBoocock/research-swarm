@@ -207,7 +207,7 @@ The interface is divided into a **sidebar** (always visible) and a **main panel*
 | **Debate** | Debate outputs from the current debate round |
 | **Synthesis** | Synthesis arbitration output |
 | **Next Round** | Meta-agent pairing proposals and status recommendations |
-| **Research Map** | Tagged research directions accumulated across all rounds |
+| **Research Map** | Tagged and attributed research directions accumulated across all rounds; **handover ↓** button per direction generates a detailed research brief |
 | **Contradictions** | Incompatible claims extracted across all rounds |
 | **Matrix** | Depth / tractability 2×2 matrix from latest synthesis |
 | **Overlap** | Pairwise agent overlap matrix |
@@ -341,11 +341,11 @@ Debate pairings are directional: the agent listed first (id1) reads and responds
 
 The synthesis agent produces concise output in six structured sections, each with an explicit word limit to control output token cost:
 
+- **RESEARCH DIRECTIONS**: 4–6 short titles tagged `[DEEP+TRACTABLE]`, `[DEEP+BLOCKED]`, `[SHALLOW+TRACTABLE]`, or `[SHALLOW+BLOCKED]` — titles only, no explanation. Appears first so that if synthesis output is truncated at the token ceiling, research directions are preserved over the lower-value sections at the end
 - **CONVERGENCES** (60 words): 2–3 mechanisms multiple agents independently converged on, one sentence each
 - **TENSIONS** (80 words): 2–3 productive disagreements, each stated as a precise incompatible claim pair
 - **MOST TRACTABLE FIRST STEP** (50 words): one specific analysis, one dataset, one method
 - **BLIND SPOTS** (40 words): 1–2 phenomena not adequately addressed, one sentence each
-- **RESEARCH DIRECTIONS**: 4–6 short titles tagged `[DEEP+TRACTABLE]`, `[DEEP+BLOCKED]`, `[SHALLOW+TRACTABLE]`, or `[SHALLOW+BLOCKED]` — titles only, no explanation
 - **CONTRADICTIONS**: 2–3 incompatible claim pairs, each field capped at 15 words, in structured format for the contradiction tracker
 
 ### Two-stage synthesis compression
@@ -379,6 +379,8 @@ The roster agent is best run before starting a new session, after significantly 
 
 Every synthesis extracts research directions tagged with their depth/tractability category. These accumulate across all rounds in the **Research Map** tab — duplicate directions are deduplicated automatically.
 
+Each direction also carries structured attribution data recorded at synthesis time: which agents contributed substantively to it, and which debate exchanges brought it into focus. This attribution is used to pre-load relevant context when generating a handover document.
+
 Each direction can be tagged:
 
 | Tag | Meaning |
@@ -389,6 +391,12 @@ Each direction can be tagged:
 | **blocked** | Theoretically interesting but currently intractable |
 
 Tags persist within the session and are included in JSON and markdown exports.
+
+### Handover documents
+
+Each research map entry has a **handover ↓** button that generates a structured markdown research brief for that direction. The handover agent reads the attributed session context — synthesis history, compressed generation outputs, full debate exchanges attributed to the direction, contradiction tracker, and research map — and produces a document covering: research background, a precise direction proposal with LaTeX equations and Mermaid diagrams, supporting evidence from the session, required data and methods, immediate next steps, a phased research programme, known obstacles, and related directions.
+
+The document is designed as a companion to the JSON session export. It references specific session content by round number and agent name rather than reproducing it at length. Generated documents can be downloaded as `.md` files directly from the modal.
 
 ### Contradiction tracker
 
@@ -439,7 +447,9 @@ Different call types use different models, selectable or fixed:
 | Synthesis | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | **Sonnet/Opus toggle** (Anthropic only) |
 | Meta-agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
 | Roster agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
+| Handover document | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
 | Generation compression | Haiku 4.5 | **2.5 Flash Lite** | Fixed (simple summarisation) |
+| Direction attribution | Haiku 4.5 | **2.5 Flash Lite** | Fixed (closed-set classification) |
 | Mandate generation | Haiku 4.5 | **2.5 Flash Lite** | Fixed (simple drafting) |
 
 Approximate token prices per million:
@@ -532,14 +542,12 @@ Without billing, the RPD limit is the binding constraint — a single 10-agent s
 
 ### Example session
 
-An example session export is available in `examples/grade-dynamics-4agents-brief-R31.json` — a
-31-round session on climbing grade dynamics with 4 agents at brief depth, with the
-reflection round enabled throughout. It can be imported directly into the tool (Session
-log tab → Import) to explore what a mature session looks like without incurring any API
-cost. The session costs $1.64 in total and contains 136 research map entries across four
-depth/tractability categories. It is also used as a reference fixture for development
-work on issues [#11](https://github.com/DBoocock/research-swarm/issues/11) and
-[#14](https://github.com/DBoocock/research-swarm/issues/14).
+Two example session exports are available in the `examples/` directory:
+
+- **`grade-dynamics-4agents-brief-R31.json`** — a 31-round session on climbing grade dynamics with 4 agents at brief depth, reflection round enabled throughout. Costs $1.64 in total; contains 136 research map entries across all four depth/tractability categories. The most mature example of an extended session.
+- **`grade-dynamics-r3-handover/`** — a 3-round session with 4 agents at brief depth, including five handover documents generated from selected directions. Demonstrates the handover feature introduced in v4.8.0 and illustrates the duplicate direction problem tracked in [issue #12](https://github.com/DBoocock/research-swarm/issues/12).
+
+Both can be imported directly into the tool (Session log tab → Import) to explore what a session looks like without incurring any API cost.
 
 To avoid losing work mid-session — particularly given API calls cost money — the tool exports automatically and frequently. A full session can be restored from a previously exported JSON file even after the browser tab is closed.
 
@@ -666,7 +674,7 @@ For post-debate synthesis, generation outputs are compressed before being passed
 Generation compression and mandate generation use Haiku (~3× cheaper than Sonnet for input and output tokens). These are simple summarisation and drafting tasks where reasoning depth does not affect quality.
 
 ### Tightly constrained synthesis prompt
-The synthesis prompt specifies exact word limits per section (60 / 80 / 50 / 40 words for the prose sections, short titles only for research directions, 15-word field caps for contradictions). This reduces synthesis output from ~2,900 tokens to ~600–800 tokens — a saving of roughly $0.03 per synthesis call at Sonnet rates. The `max_tokens` for synthesis is set to 1,200 to match.
+The synthesis prompt specifies exact word limits per section (60 / 80 / 50 / 40 words for the prose sections, short titles only for research directions, 15-word field caps for contradictions). This reduces synthesis output from ~2,900 tokens to ~600–800 tokens — a saving of roughly $0.03 per synthesis call at Sonnet rates. The `max_tokens` for synthesis is set to 1,500 to provide headroom above the constrained output size.
 
 ### Smart generation — only new agents
 After the first round, the generation button only runs agents with no existing output. Newly added agents get their initial generation without re-running agents who have already contributed. If all agents already have outputs, the button redirects to the debate tab. This means generation outputs persist between debate rounds and are only cleared at the very start of a fresh session.
