@@ -283,26 +283,26 @@ Agents learn nothing from being debated in isolation. Their base generation outp
 After each round (generation or debate), a synthesis arbitration agent reads all relevant outputs and produces a structured summary. The synthesis prompt specifies exact sections with word limits:
 
 ```
+RESEARCH DIRECTIONS (titles only, tagged by depth × tractability)
 CONVERGENCES (60 words max)
 TENSIONS (80 words max)
 MOST TRACTABLE FIRST STEP (50 words max)
 BLIND SPOTS (40 words max)
-RESEARCH DIRECTIONS (titles only, tagged by depth × tractability)
 CONTRADICTIONS (structured format: agent1 vs agent2, claims A and B, resolution method)
 ```
 
-Like the debate pair types and the depth/tractability classification, this section structure and the specific word limits emerged from collaborative AI-assisted design. The rationale for each choice is described below, but none of these have been validated against alternative synthesis formats.
+RESEARCH DIRECTIONS appears first. This is a safety measure: if the synthesis output is ever truncated due to token limits, losing part of CONTRADICTIONS is less damaging than losing the direction classifications, which feed the research map and attribution pipeline. Like the debate pair types and the depth/tractability classification, this section structure and the specific word limits emerged from collaborative AI-assisted design. The rationale for each choice is described below, but none of these have been validated against alternative synthesis formats.
 
 **Why word limits?**
 Synthesis agents without word limits produce padded, meandering outputs that dilute the signal. The limits force prioritisation. A synthesis that says "Bayesian and stochastic modellers agree on X" in one sentence is more useful than three paragraphs hedging the same point. Word limits also reduce cost.
 
 **Why structured sections rather than free-form?**
 The sections encode what matters most about a theoretical landscape:
+- **Research directions**: classified by the depth/tractability matrix (see below); appear first for robustness to truncation
 - **Convergences**: what is robustly agreed — safe to build on
 - **Tensions**: where the real intellectual action is — productive disagreement
 - **Tractable first step**: grounds the abstract in something actionable
 - **Blind spots**: what is missing — often the most generative finding
-- **Research directions**: classified by the depth/tractability matrix (see below)
 - **Contradictions**: explicitly structured for downstream tracking and resolution
 
 The depth/tractability classification of research directions — also an AI-assisted design choice — is particularly useful as a practical prioritisation tool:
@@ -320,7 +320,17 @@ quadrantChart
 
 DEEP+TRACTABLE directions are the priority: theoretically important and actionable now. DEEP+BLOCKED directions are worth tracking but cannot be pursued immediately. SHALLOW+TRACTABLE directions are near-term wins. SHALLOW+BLOCKED directions should generally be abandoned.
 
-### 6.2 Two-stage synthesis for post-debate rounds
+### 6.2 Direction attribution
+
+Each new research direction added to the research map carries structured attribution data: which agents contributed substantively to the direction, and which debate exchanges brought it into focus. This attribution is determined by a dedicated cheap-model call that runs immediately after synthesis parses new directions, before the meta-agent fires.
+
+The attribution call receives the new direction titles (enumerated by code-generated index), the complete set of valid agent IDs and debate pair keys for the current round, and a prompt asking the model to classify which agents and debates contributed substantively to each direction. The model selects from a closed, explicitly enumerated set supplied by the code — it does not invent identifiers. Invalid or unrecognised identifiers are discarded at parse time. Attributions from later rounds are merged into existing research map entries rather than replacing them: a direction first identified in round 1 may accumulate additional supporting agent outputs and debate exchanges in rounds 2 and 3.
+
+Running attribution as a separate cheap-model call rather than embedding it in the synthesis output preserves the synthesis format, avoids adding cognitive load to the synthesis model, and isolates a failure in attribution from the synthesis output itself.
+
+Attribution data has two downstream consumers: the **handover feature** (section 12.1), which uses it to pre-load targeted context for the selected direction; and the **meta-agent**, which can use it when proposing future pairings. Attribution is treated as a minimum guarantee rather than an exhaustive classification — the handover agent is not restricted to attributed sources, but attribution determines what is pre-loaded as certainly relevant.
+
+### 6.3 Two-stage synthesis for post-debate rounds
 
 After a debate round, the synthesis agent receives both generation outputs and debate outputs. Generation outputs can be long (~320–500 words each at detailed/exhaustive depth), and grow further as reflection-extended directions accumulate across rounds. Passing all of them directly to synthesis would make the synthesis prompt unwieldy and expensive.
 
@@ -599,7 +609,7 @@ The reflection round design is motivated by analogy with human learning in colla
 
 Across all rounds, the system maintains three accumulating data structures:
 
-**Research map**: all research directions proposed by the synthesis agent across all rounds, tagged by depth and tractability. Deduplicated automatically. Provides a growing map of the theoretical agenda space.
+**Research map**: all research directions proposed by the synthesis agent across all rounds, tagged by depth and tractability, with attribution data recording which agents and debate exchanges contributed substantively to each direction. Deduplicated automatically, with attributions merged across rounds. Provides a growing, attributed map of the theoretical agenda space.
 
 **Contradiction tracker**: all explicitly structured contradictions identified by the synthesis agent. Each entry records the two agents, their incompatible claims, and the proposed resolution method. Provides a record of where the theoretical landscape has genuine fault lines.
 
@@ -629,21 +639,33 @@ A completed session produces:
 
 2. **Markdown export**: human-readable session record.
 
-3. **Research map**: classified directions across all rounds.
+3. **Research map**: classified directions across all rounds, with attribution data recording which agents and debate exchanges contributed substantively to each direction.
 
 4. **Contradiction tracker**: structured fault lines in the theoretical landscape.
 
 5. **Synthesis history**: all synthesis outputs with timestamps — the evolving understanding of the landscape.
 
-The intended use of a session is not to extract any single output but to use the **accumulated structure** as the basis for researcher judgement about which directions to pursue, which tensions to investigate empirically, and what kinds of theoretical work the domain most needs.
+6. **Direction handover documents**: structured research briefs generated on demand for selected directions from the research map. Described in section 12.1.
 
-### 12.1 Future direction — direction handover documents (issue #11)
+The intended use of a session is not to extract any single output but to use the **accumulated structure** as the basis for researcher judgement about which directions to pursue, which tensions to investigate empirically, and what kinds of theoretical work the domain most needs. The handover feature is what makes that judgement directly actionable: it bridges the gap between the research map as a classified index and a direction as something a researcher can begin working on.
 
-The research map accumulates classified directions across all rounds, but the map entries are titles only — they do not contain the full context needed to act on a direction. A planned feature would allow the researcher to select one or more directions from the map and generate a structured **handover document** for each: a detailed markdown file elaborating the direction, explaining why it is promising (citing specific debate outputs and synthesis sections that support it), identifying the required data and methods, suggesting concrete first steps, and noting known obstacles.
+### 12.1 Direction handover documents
 
-These handover documents could be used directly by the researcher as working notes, or provided to an independent AI session to explore the direction further. The feature integrates naturally into the existing tool — all the required context (brief, debate outputs, synthesis history, research map) is already in session state. A new `handover` agent role would read the selected direction and the relevant session context and produce the structured document.
+The research map accumulates classified directions across all rounds, but a direction title alone does not constitute a research brief. A title like *Asymptotic grade inflation under selection bias* is meaningful to a researcher who participated in the session, but it does not convey which theoretical frameworks converge to support the direction, which debate exchanges brought it into focus, what obstacles were identified, what data it requires, or where to begin. This context is distributed across the session export and must be assembled before work can start. The handover feature automates that assembly, producing a structured document per selected direction that the researcher can use as working notes or provide directly to an independent AI session for further exploration.
 
-*This is a future direction, not the current implementation. See issue #11.*
+**Attribution at synthesis time.** The central design decision is to record which agents and debate exchanges contributed to each direction *at the moment synthesis runs*, not to reconstruct that attribution later from text. When the synthesis model classifies a new direction, it has just processed the full round context — it has the most reliable possible view of which agents proposed related ideas and which debates brought the direction into focus. Recording this as structured data attached to the research map entry, rather than leaving it implicit in the synthesis text, means the handover can draw on targeted and directly relevant context rather than the full session history. This reflects a broader design principle in the tool: information that is knowable at the time of a structured event should be recorded explicitly as structured data at that time. Reconstruction from text is slower, more fragile, and wastes information that was available at the moment of production.
+
+Attribution is recorded as a minimum guarantee, not an exhaustive classification. The handover agent is not restricted to attributed sources — it can draw on any session content it finds relevant. The attribution data determines what is pre-loaded into the handover context as certainly relevant; it does not limit what the agent can reason about.
+
+**The handover as companion to the session export.** The researcher has the full JSON session export available alongside the handover document. The handover is designed as a navigational and analytical layer on top of that export, not a replacement for it. It references specific content by round number, agent name, and section — pointing the researcher to the relevant parts of the export rather than reproducing them at length. Content is reproduced directly only where a specific equation, formal definition, or short claim would be materially inconvenient to look up. This design keeps the handover focused and prevents it from becoming a verbose paraphrase of material the researcher already has.
+
+**Ordering by research logic, not session chronology.** The session proceeds by rounds, and interesting ideas can appear in any round in any order. The handover document is ordered for research progression — the sequence in which a researcher would actually engage with the material — not for the sequence in which ideas appeared in the session. A theoretical foundation established in round 3 may belong at the beginning of a research narrative; a convergence from round 1 may belong near the end if it represents a conclusion rather than a starting point. This is a synthesis task, not a retrieval task. The handover agent constructs a research narrative in which session content appears where it is most useful, independent of when it was produced.
+
+**Agent-transcending synthesis.** The handover agent synthesises across disciplinary perspectives. It is not bound by any individual agent's mandate or framework — agent specialisations are inputs to the handover, not constraints on it. A research narrative for a direction that emerged from debate between an information theorist and an extreme value statistician need not be written from either perspective; it should be written from whichever perspective produces the most coherent and productive research brief, even if that perspective was not represented by any individual agent in the session. This is a deliberate departure from how the rest of the tool works. Generation and debate preserve disciplinary identity because heterogeneity is the mechanism that generates substantive tension. The handover has a different goal: actionable coherence for a single researcher pursuing a single direction. The swarm's heterogeneity is the *input*; the handover's synthesis is the *output*.
+
+**Mathematical and diagrammatic content.** Technical precision is a first-class output. Where a claim is most precisely expressed as an equation, the equation should appear — prose descriptions of mathematical objects are less useful to a working researcher than the objects themselves. Where a system structure, model architecture, analytical pipeline, or relationship between theoretical frameworks is more clearly represented as a diagram than as text, a Mermaid diagram should appear. The handover is a working research brief that the researcher will use to think with, not a summary intended for a general reader.
+
+**The research programme.** The handover does not only tell the researcher what to do first. It traces the full arc of the work the direction represents, organised into logical phases ordered by dependency: what must be established before the core work can begin, what the core analytical or theoretical contribution is, and how that contribution could be extended or generalised. Each phase is framed around a deliverable — the specific result, dataset, or theoretical artifact whose completion makes the next phase possible. Later phases are explicitly framed as conditional on earlier outcomes. The value is not in producing a fixed plan — research rarely follows one — but in making the dependency structure and the shape of a successful outcome explicit before work begins. Alongside the programme, the handover identifies two or three immediate actions the researcher can take with minimal setup cost and high information return: the first moves that do not require any phase to be complete before they are possible.
 
 ---
 
