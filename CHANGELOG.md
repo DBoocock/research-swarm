@@ -1,5 +1,114 @@
 # Changelog
 
+## v4.8.0
+
+### Direction handover documents (issue #11)
+
+The research map accumulated classified directions across all rounds but contained only
+titles. A researcher wanting to pursue a direction had to manually trace back through
+the session export to reconstruct the supporting context. This release adds two
+features that together bridge the gap between a classified direction title and an
+actionable research brief.
+
+#### Direction attribution
+
+Each new research direction added to the research map now carries structured
+attribution data: which agents contributed substantively to it, and which debate
+exchanges brought it into focus. Attribution is recorded by a dedicated cheap-model
+call that runs immediately after `parseSynthesis()` and before `runMeta()`.
+
+The call receives the new direction titles enumerated by code-generated index, the
+complete set of valid agent IDs for the round, and the debate pair keys for the round.
+The model selects from these closed, explicitly enumerated sets — it cannot invent
+identifiers, and any output not matching a valid ID is discarded at parse time. This
+makes invalid attribution impossible to propagate silently into session state.
+Attributions from later rounds are merged into existing map entries rather than
+replacing them: a direction first identified in round 1 accumulates additional
+supporting agents and debate refs in rounds 2 and 3.
+
+Attribution runs on both post-generation and post-debate syntheses. Post-generation
+synthesis produces agent attributions with no debate refs (correct — no debates have
+run). Attribution failure is non-fatal: the session continues and the handover feature
+falls back to full-context mode.
+
+`S.researchMap` entries now carry two new fields:
+- `agents: [agentId, ...]` — agent IDs attributed to this direction, merged across rounds
+- `debateRefs: [{round, key}, ...]` — debate pair keys attributed to this direction, merged across rounds
+
+The attribution call is available to the meta-agent, which can use attribution data
+when proposing future pairings.
+
+#### Handover document generation
+
+A "handover ↓" button on each research map entry triggers a strong-model call that
+produces a structured markdown research brief for the selected direction. The document
+is streamed into a modal and offered as a downloadable `.md` file.
+
+The handover agent receives:
+- The full brief (as system context)
+- Profiles of attributed agents (mandate + name)
+- All synthesis history (all rounds — already compact by design)
+- Compressed generation outputs (falling back to full generation text if compression
+  has not yet run for the session)
+- Full text of attributed debate outputs
+- The contradiction tracker
+- The full research map with attribution names
+
+The document is ordered for logical research progression, not for the session's
+chronological order. It is designed as a companion to the JSON session export — it
+references specific content by round number, agent name, and section heading rather
+than reproducing it at length. The handover agent is not bound by the disciplinary
+frameworks of the contributing agents; it synthesises across perspectives to produce
+the most coherent research brief available.
+
+Output format: seven sections in fixed order — research background, direction proposal
+(with LaTeX equations and Mermaid diagrams), why this direction, evidence from the
+session, required data and methods, immediate next steps, research programme (phased
+by logical dependency with deliverables), known obstacles, and related directions.
+
+**Known limitation**: `MAX_TOKENS.handover` is set to 2,000. First test run confirms
+this is insufficient for technically dense directions with multiple equations and
+diagrams — documents are truncated before all sections complete. Increase to 4,000
+for most directions; 5,000 for unusually equation-dense ones. This will be addressed
+in a follow-up release.
+
+#### Synthesis changes
+
+**RESEARCH DIRECTIONS moved to first position** in the synthesis output spec.
+Previously: CONVERGENCES, TENSIONS, MOST TRACTABLE FIRST STEP, BLIND SPOTS, RESEARCH
+DIRECTIONS, CONTRADICTIONS. Now: RESEARCH DIRECTIONS first, then the remaining
+sections in their original order. Rationale: if synthesis output is ever truncated at
+the token ceiling, losing part of CONTRADICTIONS is less damaging than losing the
+direction classifications, which feed the research map and the new attribution
+pipeline.
+
+**Token budgets increased**:
+- `MAX_TOKENS.synthesis`: 1,200 → 1,500
+- Post-debate synthesis with reflections enabled: 2,000 → 2,500
+
+#### Model routing
+
+Two new roles added to `MODELS` and `MAX_TOKENS`:
+- `handover`: strong model (Sonnet / Gemini 2.5 Flash); follows the Sonnet/Opus toggle
+  on Anthropic — this is a synthesis-tier reasoning task requiring the same depth as
+  synthesis and meta-agent calls. `MAX_TOKENS.handover: 2000` (see known limitation
+  above).
+- `attribution`: cheap model (Haiku / Gemini 2.5 Flash Lite) — closed-set
+  classification over code-supplied identifiers, not open-ended reasoning. Must not
+  use the strong model. `MAX_TOKENS.attribution: 300`.
+
+`modelFor()` updated to include `'handover'` in the Opus-eligible role list on the
+Anthropic path.
+
+#### State and export
+
+No changes to `buildExportData()` or `importSession()` — the new `agents` and
+`debateRefs` fields on `S.researchMap` entries are plain JSON-serialisable objects
+already included in the existing export and restore paths.
+
+
+---
+
 ## v4.7.0
 
 ### Incremental generation compression — structured generation state (issue #16)
