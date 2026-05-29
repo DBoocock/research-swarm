@@ -655,7 +655,7 @@ let S={
   selectedAgents:new Set(DEFAULT_AGENTS.map(a=>a.id)),
   agentStatuses:Object.fromEntries(DEFAULT_AGENTS.map(a=>[a.id,'active'])), // active|genonly|retired|promoted
   currentRound:0, running:false,
-  currentGen:{}, currentDebate:{}, currentSynthesis:null,
+  genBlocks:{}, compressedGen:{}, currentDebate:{}, currentSynthesis:null,
   pairingProposals:[], retirementProposals:[],
   rounds:[],
   researchMap:[], contradictions:[],
@@ -711,6 +711,22 @@ function buildCachedBlock(){
   // Single cached block: all brief fields combined
   // Typically ~1800+ tokens — well above the 1024 cache eligibility minimum
   return brief.sysCtx+'\n\n'+brief.resCtx+'\n\n'+brief.dataCtx;
+}
+
+function flatGen(agentId){
+  const blocks=S.genBlocks[agentId];
+  if(!blocks)return'';
+  let out=`--- INITIAL GENERATION (round ${blocks.initial.round}) ---\n${blocks.initial.text}`;
+  blocks.extensions.forEach(ext=>{out+=`\n\n--- REFLECTION-EXTENDED DIRECTIONS (round ${ext.round}) ---\n${ext.text}`;});
+  return out;
+}
+
+function flatCompressed(agentId){
+  const c=S.compressedGen[agentId];
+  if(!c)return'';
+  let out=`--- INITIAL GENERATION (round ${c.initialSummary.round}) ---\n${c.initialSummary.summary}`;
+  c.extensionSummaries.forEach(ext=>{out+=`\n\n--- REFLECTION-EXTENDED DIRECTIONS (round ${ext.round}) ---\n${ext.summary}`;});
+  return out;
 }
 
 function agentSystemBlocks(mandate){
@@ -1147,6 +1163,8 @@ function deleteAgent(id,e){
   agents=agents.filter(a=>a.id!==id);
   S.selectedAgents.delete(id);
   delete S.agentStatuses[id];
+  delete S.genBlocks[id];
+  delete S.compressedGen[id];
   renderAgentList();
 }
 
@@ -1202,7 +1220,7 @@ async function runGen(){
   const isFirstRound = S.currentRound === 0;
   const allGenAgents = isFirstRound
     ? allCandidates
-    : allCandidates.filter(a => !S.currentGen[a.id]);
+    : allCandidates.filter(a => !S.genBlocks[a.id]);
 
   if(!allGenAgents.length){
     // All agents already have generation outputs — go straight to debate
@@ -1213,8 +1231,8 @@ async function runGen(){
   const runningAll = allGenAgents.length === allCandidates.length;
   S.running=true;lockTabs();
   if(isFirstRound) S.currentRound++;
-  // Don't clear S.currentGen — preserve existing outputs for agents not in this run
-  if(isFirstRound){ S.currentGen={}; S.currentDebate={}; S.agentReflections={}; }
+  // Don't clear S.genBlocks — preserve existing outputs for agents not in this run
+  if(isFirstRound){ S.genBlocks={}; S.compressedGen={}; S.currentDebate={}; S.agentReflections={}; }
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-gen');
   // On subsequent rounds, add new agent cards without clearing existing ones
@@ -1232,6 +1250,7 @@ async function runGen(){
     : `Generating ${allGenAgents.length} new agent${allGenAgents.length>1?'s':''} — existing outputs preserved...`);
   const cards={},bodyEls={};
   allGenAgents.forEach(agent=>{
+    S.genBlocks[agent.id]={initial:{round:S.currentRound,text:''},extensions:[]};
     const card=makeResultCard(agent.name,agent.color,'running');
     panel.appendChild(card);cards[agent.id]=card;
     bodyEls[agent.id]=card.querySelector('.rcard-body');
@@ -1249,11 +1268,11 @@ async function runGen(){
         messages:[{role:'user',content:DEPTH_DIRS[S.depth]}],
         signal:new AbortController().signal,
         onChunk:chunk=>{
-          S.currentGen[agent.id]=(S.currentGen[agent.id]||'')+chunk;
-          bodyEls[agent.id].innerHTML=S.currentGen[agent.id]+'<span class="cursor"></span>';
+          S.genBlocks[agent.id].initial.text+=chunk;
+          bodyEls[agent.id].innerHTML=S.genBlocks[agent.id].initial.text+'<span class="cursor"></span>';
         }
       }).then(result=>{
-        S.currentGen[agent.id]=result;
+        S.genBlocks[agent.id].initial.text=result;
         bodyEls[agent.id].innerHTML=result;
         const badge=cards[agent.id].querySelector('.badge');
         if(badge){badge.className='badge b-done';badge.textContent='done';}
@@ -1363,7 +1382,7 @@ async function runDebate(){
         userMsg=`You have ${partners.length} debate partners this round. For each, write a focused response of approximately ${words} words in the section provided. Do not add any headers or labels of your own.\n\n`;
         partners.forEach((p,i)=>{
           const a2=agents.find(a=>a.id===p.id);
-          const out2=S.currentGen[p.id]||'(no output)';
+          const out2=flatGen(p.id)||'(no output)';
           userMsg+=`PARTNER ${i+1} — ${a2?.name||p.id} [${p.type}]:\n${buildPairHistory(id1,p.id,a2?.name||p.id)}---\n${out2}\n---\n\n`;
         });
         userMsg+=delimiters.map((d,i)=>`${d} [your ${words}-word response here]`).join('\n\n');
@@ -1371,7 +1390,7 @@ async function runDebate(){
       } else {
         const p=partners[0];
         const a2=agents.find(a=>a.id===p.id);
-        const out2=S.currentGen[p.id]||'(no output)';
+        const out2=flatGen(p.id)||'(no output)';
         userMsg=`You have read the output of ${a2?.name||p.id} (below). Write a focused debate response (~${words} words): challenge assumptions, identify incompatible predictions, or show how combining both frameworks yields something neither could produce alone.\n\n${buildPairHistory(id1,p.id,a2?.name||p.id)}${a2?.name||p.id} wrote:\n---\n${out2}\n---\n\nBe direct, technically specific, and honest about where your own framework has limits.`;
       }
       let streaming='';
@@ -1440,7 +1459,7 @@ async function runDebate(){
 // produces structured output: rebuttals to critiques received, prior critique text
 // for anti-repetition memory, and framework learning from critiques it generated.
 // Call 2 (Generation extension): agent receives its original generation + Call 1 output
-// and appends new/deepened research directions to S.currentGen[agentId].
+// and appends new/deepened research directions to S.genBlocks[agentId].extensions.
 //
 // Agents run in parallel with each other; within each agent the two calls are sequential.
 // Only agents that participated in debate (on either side) receive reflection calls.
@@ -1453,7 +1472,7 @@ async function runReflectionRound(activePairs){
     if(S.agentStatuses[p.id1]!=='retired')debatingAgentIds.add(p.id1);
     if(S.agentStatuses[p.id2]!=='retired')debatingAgentIds.add(p.id2);
   });
-  const debatingAgents=agents.filter(a=>debatingAgentIds.has(a.id)&&S.currentGen[a.id]);
+  const debatingAgents=agents.filter(a=>debatingAgentIds.has(a.id)&&S.genBlocks[a.id]);
   if(!debatingAgents.length)return;
 
   setStatus(`Reflection — ${debatingAgents.length} agent${debatingAgents.length>1?'s':''} processing debate outputs...`);
@@ -1562,7 +1581,7 @@ async function runReflectionRound(activePairs){
       S.agentReflections[agentId].learning=acrossMatch?acrossMatch[1].trim():reflectionOutput.slice(-400);
 
       // ── Call 2: Generation extension ────────────────────
-      const genExtPrompt=`You have just reflected on your debate exchanges this round. Based on what you learned, extend your research directions.\n\nYOUR RESEARCH OUTPUT (all rounds, chronological — later sections are more recent):\n---\n${S.currentGen[agentId]||'(none)'}\n---\n\nYOUR REFLECTION:\n---\n${reflectionOutput}\n---\n\nAppend new or deepened research directions that were not in your prior output. Remain largely within your disciplinary framework, or at least draw heavily on your disciplinary framework if the direction is genuinely interdisciplinary. Be specific and technically rigorous. Begin your response directly with your new directions.`;
+      const genExtPrompt=`You have just reflected on your debate exchanges this round. Based on what you learned, extend your research directions.\n\nYOUR RESEARCH OUTPUT (all rounds, chronological — later sections are more recent):\n---\n${flatGen(agentId)||'(none)'}\n---\n\nYOUR REFLECTION:\n---\n${reflectionOutput}\n---\n\nAppend new or deepened research directions that were not in your prior output. Remain largely within your disciplinary framework, or at least draw heavily on your disciplinary framework if the direction is genuinely interdisciplinary. Be specific and technically rigorous. Begin your response directly with your new directions.`;
 
       return apiStream({
         name:`genext:${agent.name.slice(0,14)}`,
@@ -1572,11 +1591,10 @@ async function runReflectionRound(activePairs){
         signal:new AbortController().signal,
         onChunk:()=>{}
       }).then(extensionOutput=>{
-        // Prepend a round-stamped header and append to S.currentGen —
-        // immediately visible to synthesis and meta-agent.
-        // Label ownership lives here, not in the model prompt.
-        const block=`--- REFLECTION-EXTENDED DIRECTIONS (round ${S.currentRound}) ---\n${extensionOutput.trim()}`;
-        S.currentGen[agentId]=(S.currentGen[agentId]||'')+'\n\n'+block;
+        if(!S.genBlocks[agentId]){
+          S.genBlocks[agentId]={initial:{round:S.currentRound,text:''},extensions:[]};
+        }
+        S.genBlocks[agentId].extensions.push({round:S.currentRound,text:extensionOutput.trim()});
       });
     });
   };
@@ -1618,12 +1636,12 @@ async function runSynthesis(includeDebate){
       });
     } else {
       // Post-generation: use full outputs — first synthesis of the round
-      // Exclude retired agents whose outputs persist in S.currentGen
-      Object.entries(S.currentGen)
+      // Exclude retired agents
+      Object.entries(S.genBlocks)
         .filter(([id])=>S.agentStatuses[id]!=='retired')
-        .forEach(([id,text])=>{
+        .forEach(([id])=>{
           const agent=agents.find(a=>a.id===id);
-          allOutputs+=`\n\n=== ${agent?agent.name.toUpperCase():id} ===\n${text}`;
+          allOutputs+=`\n\n=== ${agent?agent.name.toUpperCase():id} ===\n${flatGen(id)}`;
         });
     }
 
@@ -1691,48 +1709,96 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
   }
 }
 
-// Compress generation outputs to ~80 words each in a single batched call
-// Optimisation: one API call with all outputs, returns structured summaries
 async function compressGenerationOutputs(){
-  // Exclude retired agents — their outputs persist in S.currentGen but should not
-  // feed synthesis or meta-agent prompts after retirement
-  const entries=Object.entries(S.currentGen).filter(([id])=>S.agentStatuses[id]!=='retired');
+  const entries=Object.entries(S.genBlocks).filter(([id])=>S.agentStatuses[id]!=='retired');
   if(!entries.length)return[];
-  const agentBlocks=entries.map(([id,text],i)=>{
-    const name=agents.find(a=>a.id===id)?.name||id;
-    return`===AGENT_${i}===\nAGENT: ${name}\n${text}`;
-  }).join('\n\n---\n\n');
 
-  const prompt=`Summarise each agent's output below in approximately 80 words each, preserving the key technical claims and proposed methods. Begin each summary immediately after its ===AGENT_N=== delimiter. Your output must contain only the delimiters and summary text — do not add any titles, labels, or headers of your own.\n\nOutputs:\n${agentBlocks}`;
+  // ── Batch 1: Initial-block compression ───────────────────────────────────
+  const needsInitial=entries.filter(([id])=>!S.compressedGen[id]);
 
-  // Scale max output tokens with roster size: ~200 tokens per agent gives comfortable
-  // headroom over the 80-word (~110 token) target to account for model verbosity variation.
-  // When reflections are enabled, generation outputs grow across rounds as extensions
-  // accumulate, but the compression output length scales with agent count not input length
-  // (the model is distilling, not echoing). The floor of MAX_TOKENS.compression preserves
-  // existing behaviour for small rosters without reflections.
-  const compressionMaxTok=S.reflectionsEnabled
-    ? Math.max(MAX_TOKENS.compression, entries.length*200)
-    : MAX_TOKENS.compression;
+  if(needsInitial.length){
+    const agentBlocks=needsInitial.map(([id],i)=>{
+      const name=agents.find(a=>a.id===id)?.name||id;
+      const block=S.genBlocks[id];
+      return`===AGENT_${i}===\nAGENT: ${name}\n${block.initial.text}`;
+    }).join('\n\n---\n\n');
 
-  let raw='';
-  await apiStream({
-    name:'gen-compress',
-    role:'compression',
-    systemBlocks:briefOnlyBlock(),
-    messages:[{role:'user',content:prompt}],
-    signal:new AbortController().signal,
-    maxTokensOverride:compressionMaxTok,
-    onChunk:c=>{raw+=c;}
+    const prompt=
+      `Summarise each agent's initial generation output below in approximately 80 words each, `+
+      `preserving the key technical claims and proposed methods. Begin each summary immediately `+
+      `after its ===AGENT_N=== delimiter. Your output must contain only the delimiters and summary `+
+      `text — do not add any titles, labels, or headers of your own.\n\nOutputs:\n${agentBlocks}`;
+
+    let raw='';
+    await apiStream({
+      name:'gen-compress-init',
+      role:'compression',
+      systemBlocks:briefOnlyBlock(),
+      messages:[{role:'user',content:prompt}],
+      signal:new AbortController().signal,
+      maxTokensOverride:Math.max(MAX_TOKENS.compression,needsInitial.length*200),
+      onChunk:c=>{raw+=c;}
+    });
+
+    const parts=raw.split(/===AGENT_\d+===/);
+    needsInitial.forEach(([id],i)=>{
+      const block=S.genBlocks[id];
+      const summary=(parts[i+1]||'').replace(/={1,3}$/,'').trim();
+      const fallback=block.initial.text.slice(0,400)+'...';
+      S.compressedGen[id]={
+        initialSummary:{round:block.initial.round,summary:summary||fallback},
+        extensionSummaries:[]
+      };
+    });
+  }
+
+  // ── Batch 2: Extension-block compression ─────────────────────────────────
+  const extensionBatch=entries.filter(([id])=>{
+    if(!S.compressedGen[id])return false;
+    return S.genBlocks[id].extensions.length>S.compressedGen[id].extensionSummaries.length;
   });
 
-  // Parse summaries — split on code-generated indexed delimiters, fall back to
-  // a raw generation slice if a segment is missing (e.g. truncated response)
-  const parts=raw.split(/===AGENT_\d+===/);
-  return entries.map(([id],i)=>{
+  if(extensionBatch.length){
+    const agentBlocks=extensionBatch.map(([id],i)=>{
+      const name=agents.find(a=>a.id===id)?.name||id;
+      const blocks=S.genBlocks[id];
+      const cached=S.compressedGen[id];
+      const ext=blocks.extensions[cached.extensionSummaries.length];
+      return`===AGENT_${i}===\nAGENT: ${name}\n${ext.text}`;
+    }).join('\n\n---\n\n');
+
+    const prompt=
+      `Summarise each agent's reflection-extended directions below in approximately 60 words each, `+
+      `preserving key technical claims and new directions proposed. Begin each summary immediately `+
+      `after its ===AGENT_N=== delimiter. Your output must contain only the delimiters and summary `+
+      `text — do not add any titles, labels, or headers of your own.\n\nOutputs:\n${agentBlocks}`;
+
+    let raw='';
+    await apiStream({
+      name:'gen-compress-ext',
+      role:'compression',
+      systemBlocks:briefOnlyBlock(),
+      messages:[{role:'user',content:prompt}],
+      signal:new AbortController().signal,
+      maxTokensOverride:Math.max(MAX_TOKENS.compression,extensionBatch.length*160),
+      onChunk:c=>{raw+=c;}
+    });
+
+    const parts=raw.split(/===AGENT_\d+===/);
+    extensionBatch.forEach(([id],i)=>{
+      const blocks=S.genBlocks[id];
+      const cached=S.compressedGen[id];
+      const ext=blocks.extensions[cached.extensionSummaries.length];
+      const summary=(parts[i+1]||'').replace(/={1,3}$/,'').trim();
+      const fallback=ext.text.slice(0,400)+'...';
+      cached.extensionSummaries.push({round:ext.round,summary:summary||fallback});
+    });
+  }
+
+  // Return {name, summary} array — same shape as before, runSynthesis unchanged
+  return entries.map(([id])=>{
     const name=agents.find(a=>a.id===id)?.name||id;
-    const summary=(parts[i+1]||'').replace(/={1,3}$/, '').trim();
-    return{name,summary:summary||S.currentGen[id].slice(0,400)+'...'};
+    return{name,summary:flatCompressed(id)};
   });
 }
 
@@ -1740,7 +1806,7 @@ async function compressGenerationOutputs(){
 // META-AGENT
 // ══════════════════════════════════════════════════════════
 async function runMeta(synthesisText){
-  const active=agents.filter(a=>S.agentStatuses[a.id]!=='retired'&&S.currentGen[a.id]);
+  const active=agents.filter(a=>S.agentStatuses[a.id]!=='retired'&&S.genBlocks[a.id]);
   if(active.length<2){
     // Clear stale proposals — if there are too few active agents to debate,
     // the previous round's proposals must not persist into the next round.
@@ -2149,7 +2215,10 @@ function acceptRec(i){
     S.agentStatuses[rec.id]=rec.status||'retired';
     // Remove retired agent's generation output so it stops feeding synthesis
     // and meta-agent prompts, preventing the pairing loop bug
-    if((rec.status||'retired')==='retired') delete S.currentGen[rec.id];
+    if((rec.status||'retired')==='retired'){
+      delete S.genBlocks[rec.id];
+      delete S.compressedGen[rec.id];
+    }
   } else {
     S.agentStatuses[rec.id]='active';
   }
@@ -2312,7 +2381,7 @@ function saveRound(includeDebate){
   const seqNum = S.rounds.length + 1;
   S.rounds.push({
     round:seqNum,ts:new Date().toISOString(),depth:S.depth,
-    generationOutputs:{...S.currentGen},debateOutputs:{...S.currentDebate},
+    genBlocks:JSON.parse(JSON.stringify(S.genBlocks)),debateOutputs:{...S.currentDebate},
     synthesis:S.currentSynthesis,pairingProposals:[...S.pairingProposals],
     retirementProposals:[...S.retirementProposals],
     agentReflections:JSON.parse(JSON.stringify(S.agentReflections))
@@ -2326,7 +2395,7 @@ function renderLog(){
   p.appendChild(makeSectionLabel(`${S.rounds.length} round${S.rounds.length>1?'s':''} — auto-exported after each synthesis`));
   [...S.rounds].reverse().forEach(r=>{
     const div=document.createElement('div');div.className='log-entry';
-    const genNames=Object.keys(r.generationOutputs).map(id=>agents.find(a=>a.id===id)?.name||id);
+    const genNames=Object.keys(r.genBlocks).map(id=>agents.find(a=>a.id===id)?.name||id);
     const debCount=Object.keys(r.debateOutputs).length;
     div.innerHTML=`<div class="log-entry-hdr"><span class="badge b-done">done</span><span style="font-size:12px;color:var(--text2);flex:1;margin-left:6px;">Round ${r.round} · ${r.depth} · ${new Date(r.ts).toLocaleTimeString()}</span></div>
       <div class="log-entry-body">${genNames.length} agents · ${debCount} debate outputs\n\n${r.synthesis?r.synthesis.slice(0,400)+'…':'(no synthesis)'}</div>`;
@@ -2375,7 +2444,8 @@ function buildExportData(){
     sessionCost:{total:costS.total,saved:costS.saved,inputTok:costS.inp,outputTok:costS.out,cacheReads:costS.cr,cacheWrites:costS.cw},
     rounds:S.rounds,researchMap:S.researchMap,contradictions:S.contradictions,
     matrix:S.matrix,overlapScores:S.overlapScores,
-    agentReflections:S.agentReflections};
+    agentReflections:S.agentReflections,
+    genBlocks:S.genBlocks,compressedGen:S.compressedGen};
 }
 
 function buildMd(){
@@ -2388,7 +2458,12 @@ function buildMd(){
   S.contradictions.forEach(c=>out+=`- **${c.a1} vs ${c.a2}** (R${c.round})\n  ${c.claim1} — vs — ${c.claim2}\n  *Resolution: ${c.resolution}*\n\n`);
   S.rounds.forEach(r=>{
     out+=`\n${'='.repeat(60)}\n## Round ${r.round} · ${r.depth}\n\n### Generation\n\n`;
-    Object.entries(r.generationOutputs).forEach(([id,text])=>{const n=agents.find(a=>a.id===id)?.name||id;out+=`#### ${n}\n${text}\n\n`;});
+    Object.entries(r.genBlocks).forEach(([id,blocks])=>{
+      const n=agents.find(a=>a.id===id)?.name||id;
+      let text=`--- INITIAL GENERATION (round ${blocks.initial.round}) ---\n${blocks.initial.text}`;
+      blocks.extensions.forEach(ext=>{text+=`\n\n--- REFLECTION-EXTENDED DIRECTIONS (round ${ext.round}) ---\n${ext.text}`;});
+      out+=`#### ${n}\n${text}\n\n`;
+    });
     if(Object.keys(r.debateOutputs).length){
       out+=`### Debate\n\n`;
       Object.entries(r.debateOutputs).forEach(([key,text])=>{
@@ -2475,6 +2550,8 @@ function importSession(event){
       if(data.matrix)S.matrix={...data.matrix};
       if(data.overlapScores)S.overlapScores={...data.overlapScores};
       if(data.agentReflections)S.agentReflections={...data.agentReflections};
+      if(data.genBlocks)S.genBlocks=JSON.parse(JSON.stringify(data.genBlocks));
+      if(data.compressedGen)S.compressedGen=JSON.parse(JSON.stringify(data.compressedGen));
       if(typeof data.reflectionsEnabled==='boolean'){
         S.reflectionsEnabled=data.reflectionsEnabled;
         const tog=document.getElementById('reflection-toggle');
