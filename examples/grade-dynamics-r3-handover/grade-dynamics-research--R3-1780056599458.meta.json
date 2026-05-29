@@ -1,0 +1,11 @@
+{
+  "version": "4.8.0",
+  "produced_at": "2026-05-29",
+  "provider": "gemini",
+  "depth": "brief",
+  "agents": 4,
+  "rounds": 3,
+  "reflections_enabled": true,
+  "cost_usd": 0.1041,
+  "notes": "First test of Issue #11 fix with four handover messages produced."
+}
