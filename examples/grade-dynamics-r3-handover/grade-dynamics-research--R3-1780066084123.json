@@ -1,5 +1,5 @@
 {
-  "exportTime": "2026-05-29T12:09:59.458Z",
+  "exportTime": "2026-05-29T14:48:04.123Z",
   "provider": "gemini",
   "brief": {
     "title": "Grade Dynamics Research Swarm",
@@ -72,10 +72,10 @@
     }
   },
   "sessionCost": {
-    "total": 0.07578900000000001,
+    "total": 0.1040615,
     "saved": 0,
-    "inputTok": 122711,
-    "outputTok": 18305,
+    "inputTok": 150336,
+    "outputTok": 26299,
     "cacheReads": 0,
     "cacheWrites": 0
   },
