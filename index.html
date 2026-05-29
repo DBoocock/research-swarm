@@ -183,6 +183,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 .me-hdr{display:flex;gap:6px;align-items:flex-start;}
 .me-title{font-size:12px;color:var(--text);flex:1;line-height:1.4;}
 .me-meta{font-size:10px;color:var(--text3);white-space:nowrap;}
+.handover-output{font-family:var(--mono);font-size:11px;color:var(--text2);line-height:1.75;white-space:pre-wrap;padding:4px 0;}
 .tag-row{display:flex;gap:3px;flex-wrap:wrap;}
 .tag-btn{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:10px;border:1px solid var(--border);background:var(--bg4);color:var(--text3);cursor:pointer;transition:all .1s;}
 .tag-btn:hover{border-color:var(--border2);color:var(--text2);}
@@ -490,6 +491,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 </div>
 </div>
 
+<!-- ══ HANDOVER MODAL ══ -->
+<div class="modal-bg hidden" id="handover-modal">
+<div class="modal modal-lg">
+  <div class="modal-hdr">
+    <span class="modal-title" id="handover-modal-title">Direction handover</span>
+    <button class="modal-close" onclick="closeHandoverModal()">close</button>
+  </div>
+  <div class="modal-body">
+    <div class="handover-output" id="handover-output"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="mbtn mbtn-s" onclick="closeHandoverModal()">close</button>
+    <button class="mbtn mbtn-p" id="handover-download-btn" onclick="downloadHandover()" disabled>↓ download .md</button>
+  </div>
+</div>
+</div>
+
 <script>
 // ══════════════════════════════════════════════════════════
 // PROVIDERS
@@ -669,6 +687,9 @@ let S={
 
 let costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[]};
 
+let _handoverContent='';
+let _handoverTitle='';
+
 // ── Model selection ──
 // Generation and debate always use the strong model — reasoning depth matters.
 // Synthesis, meta-agent, and roster are configurable (Anthropic: Sonnet/Opus toggle).
@@ -683,6 +704,8 @@ const MODELS={
   synthesis:   {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
   meta:        {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
   roster:      {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
+  handover:    {anthropic:'claude-sonnet-4-6',        gemini:'gemini-2.5-flash'},      // strong model; Sonnet/Opus toggle applies — synthesis-tier reasoning task
+  attribution: {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap model — closed-set classification, not reasoning
   compression: {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap task: summarisation
   mandate:     {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap task: constrained rewriting
 };
@@ -703,6 +726,30 @@ const DEPTH_DIRS={
     'Prioritise directions that are both theoretically deep and not fully covered by adjacent fields.'
 };
 const DEPTH_WORDS={brief:150,detailed:250,exhaustive:400};
+
+const HANDOVER_ROLE=
+`You are a research handover agent for a multi-agent theoretical research swarm. \
+A session has completed and a researcher has selected a specific direction to pursue. \
+Your task is to produce a detailed, structured handover document that takes the \
+researcher as far as possible in understanding and planning work on this direction.
+
+The researcher has the full JSON session export available alongside this document. \
+Reference content within it by round number, agent name, and section heading rather \
+than reproducing it at length. Reproduce content directly only when a specific \
+equation, formal claim, or short definition would be materially inconvenient to look up.
+
+The document must be:
+- Ordered logically for research progression, not chronologically by session order
+- Weighted toward the most research-relevant ideas regardless of when they appeared
+- Technically precise; express all mathematical content in LaTeX notation \
+(inline $...$ and display $$...$$)
+- Illustrated with Mermaid diagrams (\`\`\`mermaid blocks) wherever they clarify \
+model structure, system dynamics, analytical pipelines, or research flow; \
+use plain ASCII schematics only as a fallback for spatial layouts that Mermaid \
+cannot express cleanly
+- Written as a companion to the session export — specific, attributed, and \
+immediately actionable
+- Free of waffle: every sentence must earn its place`;
 
 // ══════════════════════════════════════════════════════════
 // BRIEF — build cached block
@@ -785,7 +832,7 @@ function renderCost(){
 
 // Max tokens per call type — synthesis produces long structured output and needs more room
 const MAX_TOKENS={
-  synthesis:    1200, // tightly constrained prompt: ~330 words structured output
+  synthesis:    1500, // tightly constrained prompt: ~330 words structured output
   meta:         1500,
   roster:       3000,
   generation:   1200,
@@ -794,13 +841,15 @@ const MAX_TOKENS={
   genextension:  500, // appended new directions — focused, not exhaustive
   compression:   600,
   mandate:       600, // rewriting existing mandate, keep concise
+  handover:    10000, // generous budget — structured document with equations and diagrams
+  attribution:   300, // N short lines of form "DIRECTION N: agents=[...] debates=[...]"
 };
 
 function modelFor(role){
   const p=S.provider||'gemini';
   const row=MODELS[role]||MODELS.generation;
   // Opus toggle only applies on the Anthropic path for synthesis-tier calls
-  if(p==='anthropic'&&['synthesis','meta','roster'].includes(role)&&S.synthesisModel==='opus'){
+  if(p==='anthropic'&&['synthesis','meta','roster','handover'].includes(role)&&S.synthesisModel==='opus'){
     return 'claude-opus-4-6';
   }
   return row[p]||row.anthropic;
@@ -1649,6 +1698,13 @@ async function runSynthesis(includeDebate){
 
 Write a concise synthesis using these exact sections. Keep strictly to the word limits — do not pad.
 
+RESEARCH DIRECTIONS (titles only, no explanation):
+[DEEP+TRACTABLE] Title
+[DEEP+BLOCKED] Title
+[SHALLOW+TRACTABLE] Title
+[SHALLOW+BLOCKED] Title
+(4-6 directions, each title under 20 words)
+
 CONVERGENCES (60 words max): 2-3 mechanisms multiple agents independently converge on. One sentence each.
 
 TENSIONS (80 words max): 2-3 productive tensions. State each as a precise incompatible claim pair in one sentence.
@@ -1656,13 +1712,6 @@ TENSIONS (80 words max): 2-3 productive tensions. State each as a precise incomp
 MOST TRACTABLE FIRST STEP (50 words max): One specific analysis, one dataset, one method.
 
 BLIND SPOTS (40 words max): 1-2 phenomena not addressed. One sentence each.
-
-RESEARCH DIRECTIONS (titles only, no explanation):
-[DEEP+TRACTABLE] Title
-[DEEP+BLOCKED] Title
-[SHALLOW+TRACTABLE] Title
-[SHALLOW+BLOCKED] Title
-(4-6 directions, each title under 20 words)
 
 CONTRADICTIONS (one per line, exact format):
 AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resolution needed: [method in ≤15 words]
@@ -1673,7 +1722,7 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     // REFLECTION-EXTENDED DIRECTIONS are appended. This increases the compression
     // step's output and pushes synthesis harder against its token ceiling.
     // Use a higher limit post-debate with reflections on to avoid mid-sentence truncation.
-    const synthMaxTok=(includeDebate&&S.reflectionsEnabled)?2000:MAX_TOKENS.synthesis;
+    const synthMaxTok=(includeDebate&&S.reflectionsEnabled)?2500:MAX_TOKENS.synthesis;
     const result=await apiStream({
       name:'synthesis',
       role:'synthesis',
@@ -1692,7 +1741,10 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     sc.querySelector('.badge').className='badge b-done';sc.querySelector('.badge').textContent='done';
     updateRoundHdr(hdr,'done');tc('syn',1);
     setStatus('Synthesis complete. Running meta-agent...');
+    const mapLengthBefore=S.researchMap.length;
     parseSynthesis(result);
+    const newDirections=S.researchMap.slice(mapLengthBefore);
+    await runAttribution(newDirections);
     await runMeta(result);
     saveRound(includeDebate);
     autoExportJson();
@@ -1800,6 +1852,329 @@ async function compressGenerationOutputs(){
     const name=agents.find(a=>a.id===id)?.name||id;
     return{name,summary:flatCompressed(id)};
   });
+}
+
+// ══════════════════════════════════════════════════════════
+// ATTRIBUTION
+// ══════════════════════════════════════════════════════════
+async function runAttribution(newDirections){
+  if(!newDirections.length)return;
+
+  // Active agents with generation outputs — these are the valid attribution candidates
+  const activeAgents=agents.filter(a=>S.agentStatuses[a.id]!=='retired'&&S.genBlocks[a.id]);
+  if(!activeAgents.length)return;
+
+  // Debate pairs from this round — may be empty on post-generation synthesis
+  const debatePairs=Object.keys(S.currentDebate).map(key=>{
+    const[id1,id2]=key.split('_');
+    const n1=agents.find(a=>a.id===id1)?.name||id1;
+    const n2=agents.find(a=>a.id===id2)?.name||id2;
+    return{key,label:`${n1} → ${n2}`};
+  });
+
+  // Closed sets for output validation — anything not in these is discarded at parse time
+  const validAgentIds=new Set(activeAgents.map(a=>a.id));
+  const validDebateKeys=new Set(debatePairs.map(p=>p.key));
+
+  const directionLines=newDirections
+    .map((d,i)=>`${i}: [${d.category}] ${d.title}`)
+    .join('\n');
+
+  const agentLines=activeAgents
+    .map(a=>`${a.id}  (${a.name})`)
+    .join('\n');
+
+  const debateLines=debatePairs.length
+    ?debatePairs.map(p=>`${p.key}  (${p.label})`).join('\n')
+    :'(no debates this round)';
+
+  const attributionPrompt=
+`Classify which agents and debate exchanges made substantive contributions to each research direction.
+
+An agent contributed substantively if the direction builds directly on their theoretical framework or a specific proposal they made.
+A debate exchange is relevant if the direction emerged from or directly addresses a tension raised in that exchange.
+
+DIRECTIONS:
+${directionLines}
+
+VALID AGENT IDs (copy exactly — do not invent or abbreviate):
+${agentLines}
+
+VALID DEBATE KEYS this round (copy exactly — do not invent):
+${debateLines}
+
+For each direction, output exactly one line in this format:
+DIRECTION 0: agents=[id1,id2] debates=[key1]
+DIRECTION 1: agents=[id3] debates=[]
+
+Use an empty list [] where nothing contributed. Output only these lines — no explanation, no preamble.`;
+
+  try{
+    let raw='';
+    await apiStream({
+      name:'attribution',
+      role:'attribution',
+      systemString:buildCachedBlock(), // no cache_control — one-off call, nothing to amortise
+      messages:[{role:'user',content:attributionPrompt}],
+      signal:new AbortController().signal,
+      onChunk:c=>{raw+=c;}
+    });
+
+    // Parse against closed sets — invalid identifiers are silently discarded
+    const attrRegex=/DIRECTION\s+(\d+):\s*agents=\[([^\]]*)\]\s*debates=\[([^\]]*)\]/g;
+    for(const m of raw.matchAll(attrRegex)){
+      const idx=parseInt(m[1]);
+      if(idx<0||idx>=newDirections.length)continue;
+
+      const agentIds=m[2].split(',').map(s=>s.trim()).filter(id=>id&&validAgentIds.has(id));
+      const debateKeys=m[3].split(',').map(s=>s.trim()).filter(k=>k&&validDebateKeys.has(k));
+
+      // Direct reference to the map entry — no lookup by title needed
+      const entry=newDirections[idx];
+      entry.agents=[...new Set([...entry.agents,...agentIds])];
+      entry.debateRefs=[
+        ...entry.debateRefs,
+        ...debateKeys
+          .filter(k=>!entry.debateRefs.some(r=>r.key===k&&r.round===S.currentRound))
+          .map(k=>({round:S.currentRound,key:k}))
+      ];
+    }
+  }catch(e){
+    // Attribution failure is non-fatal — handover falls back gracefully to full context
+    console.warn('Attribution call failed:',e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// HANDOVER — context builders
+// ══════════════════════════════════════════════════════════
+function buildHandoverContext(item){
+  // Agent profiles — attributed agents if available, all active as fallback
+  const profileAgents=(item.agents||[]).length
+    ?agents.filter(a=>item.agents.includes(a.id))
+    :agents.filter(a=>S.agentStatuses[a.id]!=='retired');
+
+  const agentProfiles=profileAgents
+    .map(a=>`${a.name} (id: ${a.id})\n${a.mandate}`)
+    .join('\n\n');
+
+  // Synthesis history — all rounds, already compact by design
+  const synthesisHistory=S.rounds
+    .map(r=>`=== SYNTHESIS: Round ${r.round} ===\n${r.synthesis||'(none)'}`)
+    .join('\n\n');
+
+  // Compressed generation outputs — fall back to full gen if compression not yet run
+  const compressedGen=Object.keys(S.genBlocks)
+    .filter(id=>S.agentStatuses[id]!=='retired')
+    .map(id=>{
+      const name=agents.find(a=>a.id===id)?.name||id;
+      const text=flatCompressed(id)||flatGen(id); // flatCompressed is empty before first post-debate synthesis
+      return`=== ${name.toUpperCase()} ===\n${text}`;
+    })
+    .join('\n\n');
+
+  // Full text of attributed debate outputs
+  const attributedDebate=(item.debateRefs||[])
+    .map(ref=>{
+      const round=S.rounds.find(r=>r.round===ref.round);
+      const text=round?.debateOutputs?.[ref.key]||'(not found in session export)';
+      const[id1,id2]=ref.key.split('_');
+      const n1=agents.find(a=>a.id===id1)?.name||id1;
+      const n2=agents.find(a=>a.id===id2)?.name||id2;
+      return`=== DEBATE: ${n1} → ${n2}, Round ${ref.round} ===\n${text}`;
+    })
+    .join('\n\n');
+
+  // Contradiction tracker
+  const contradictions=S.contradictions.length
+    ?S.contradictions
+        .map(c=>`${c.a1} vs ${c.a2} (Round ${c.round})\n  ${c.claim1} — vs — ${c.claim2}\n  Resolution needed: ${c.resolution}`)
+        .join('\n\n')
+    :'(none recorded)';
+
+  // Research map — all directions with attribution names where available
+  const researchMap=S.researchMap
+    .map(r=>{
+      let line=`[${r.category}] ${r.title} (Round ${r.round}${r.tag?', '+r.tag:''})`;
+      if(r.agents&&r.agents.length){
+        const names=r.agents.map(id=>agents.find(a=>a.id===id)?.name||id).join(', ');
+        line+=` — agents: ${names}`;
+      }
+      return line;
+    })
+    .join('\n');
+
+  return{agentProfiles,synthesisHistory,compressedGen,attributedDebate,contradictions,researchMap};
+}
+
+function buildHandoverUserMsg(item,ctx){
+  return(
+`SELECTED DIRECTION: ${item.title}
+CATEGORY: ${item.category}
+FIRST IDENTIFIED: Round ${item.round}
+RESEARCHER TAG: ${item.tag||'untagged'}
+
+---
+
+AGENT PROFILES (agents attributed to this direction):
+${ctx.agentProfiles}
+
+---
+
+SYNTHESIS HISTORY (all rounds):
+${ctx.synthesisHistory}
+
+---
+
+GENERATION OUTPUTS (compressed — full text in session export):
+${ctx.compressedGen}
+
+---
+
+DEBATE OUTPUTS ATTRIBUTED TO THIS DIRECTION (full text):
+${ctx.attributedDebate||'(no debates attributed — draw on synthesis history and generation outputs)'}
+
+---
+
+CONTRADICTION TRACKER:
+${ctx.contradictions}
+
+---
+
+FULL RESEARCH MAP (all directions, for related-direction identification):
+${ctx.researchMap}
+
+---
+
+Produce the handover document using these sections in this exact order. Do not add, rename, or reorder sections.
+
+## ${item.title}
+
+**Category:** ${item.category} | **First identified:** Round ${item.round}
+
+### Research background
+The theoretical and empirical landscape this direction sits within, as established by the swarm. Draw on convergences, tensions, and blind spots from the synthesis history. Give the researcher the intellectual context they need before beginning work — prior frameworks, known results, and the questions that remain open. Include a Mermaid diagram if it usefully represents the system structure or the relationship between competing theoretical frameworks.
+
+### Direction proposal
+A precise, self-contained statement of what this direction proposes: the research question, the theoretical claim, and the intended analytical approach. A researcher reading only this section should understand exactly what is being proposed and why it is non-trivial. State the central mathematical formulation using display equations. Include a Mermaid diagram of the model structure, data flow, or analytical pipeline where it adds clarity beyond what equations alone provide.
+
+### Why this direction
+What makes this direction scientifically promising: which tensions or contradictions from the session it addresses, which blind spots it fills, what convergence evidence supports it. Reference specific synthesis sections and debate exchanges by round number and agent name — the researcher has the full export. Explain what a successful outcome would contribute and why the question is genuinely open.
+
+### Evidence from the session
+Which agent outputs and debate exchanges substantiate this direction, and how. Attribute specifically: name the agent, characterise their contribution, state whether it came from initial generation, debate, or reflection extension, and give the round number. Point to locations in the export rather than reproducing at length.
+
+### Required data and methods
+For each dataset or method required: what it is, whether it is available from the brief's data sources or requires new collection, and any methodological prerequisites. Note where methods from multiple agents' frameworks would need to be combined, and flag non-trivial technical dependencies.
+
+### Immediate next steps
+Two or three actions the researcher can take right now — concrete enough to act on today, with minimal setup cost and high information return.
+
+### Research programme
+The full arc of work this direction represents, ordered by logical dependency.
+
+#### Phase 1 — Groundwork
+What must be established before the core work can proceed. State the deliverable: the specific result, dataset, or theoretical artifact that completes this phase and makes Phase 2 possible.
+
+#### Phase 2 — Core contribution
+The main analytical or theoretical work. What a successful outcome looks like; what a null or negative result would mean and how to interpret it. State the deliverable.
+
+#### Phase 3 — Extension and consolidation
+How the core result generalises, what adjacent questions it opens, what follow-on work becomes possible. Frame as conditional on Phase 2 outcomes. State potential publishable or shareable outputs.
+
+### Known obstacles
+Each obstacle with: a precise characterisation of the difficulty, whether a resolution was proposed in the session (cite by round and agent if so), and whether it remains open.
+
+### Related directions
+Directions from the research map that are complementary (could be combined or sequenced with this one) or in tension (address similar questions with incompatible assumptions). One or two sentences per direction.`
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// HANDOVER — run and modal
+// ══════════════════════════════════════════════════════════
+async function runHandover(idx){
+  if(!S.rounds.length){
+    setStatus('Run at least one synthesis before generating a handover document.');
+    return;
+  }
+  const item=S.researchMap[idx];
+  if(!item)return;
+
+  _handoverTitle=item.title;
+  _handoverContent='';
+  openHandoverModal(item.title);
+  setStatus('Generating handover document...');
+
+  const isAnthropic=(S.provider||'gemini')==='anthropic';
+  const handoverSystemBlocks=[
+    {type:'text',text:buildCachedBlock()}, // no cache_control — one-shot call
+    {type:'text',text:'\n\n'+HANDOVER_ROLE}
+  ];
+
+  const ctx=buildHandoverContext(item);
+  const userMsg=buildHandoverUserMsg(item,ctx);
+
+  try{
+    let result='';
+    await apiStream({
+      name:`handover:${item.title.slice(0,20)}`,
+      role:'handover',
+      systemBlocks:handoverSystemBlocks,
+      messages:[{role:'user',content:userMsg}],
+      signal:new AbortController().signal,
+      onChunk:chunk=>{
+        result+=chunk;
+        updateHandoverModal(result,false);
+      }
+    });
+    _handoverContent=result;
+    updateHandoverModal(result,true);
+    setStatus('Handover document ready — review and download from the modal.');
+  }catch(e){
+    if(e.name==='AbortError')return;
+    updateHandoverModal(null,false,e.message);
+    setStatus('Handover error: '+e.message);
+  }
+}
+
+function openHandoverModal(title){
+  document.getElementById('handover-modal-title').textContent=title;
+  document.getElementById('handover-output').innerHTML='<span class="cursor"></span>';
+  document.getElementById('handover-download-btn').disabled=true;
+  document.getElementById('handover-modal').classList.remove('hidden');
+}
+
+function updateHandoverModal(text,done,errorMsg){
+  const el=document.getElementById('handover-output');
+  if(!el)return;
+  if(errorMsg){
+    el.innerHTML=`<span style="color:var(--danger)">Error: ${errorMsg}</span>`;
+    return;
+  }
+  el.textContent=text||''; // textContent preserves pre-wrap; safe against XSS
+  if(!done)el.innerHTML+=`<span class="cursor"></span>`;
+  if(done){
+    document.getElementById('handover-download-btn').disabled=false;
+  }
+}
+
+function closeHandoverModal(){
+  document.getElementById('handover-modal').classList.add('hidden');
+}
+
+function downloadHandover(){
+  if(!_handoverContent)return;
+  const prefix=brief.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,24);
+  const slug=_handoverTitle.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40);
+  const fname=`${prefix}-handover-${slug}.md`;
+  try{
+    const blob=new Blob([_handoverContent],{type:'text/markdown'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=fname;a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`Handover exported: ${fname} → your Downloads folder`);
+  }catch(e){setStatus('Download failed: '+e.message);}
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2237,7 +2612,7 @@ function parseSynthesis(text){
     const title=line.replace(/\[.*?\]/g,'').replace(/^[\s\-–•\d.*]+/,'').trim();
     const cat=line.match(/\[(.*?)\]/)?.[1]||'';
     if(title&&!S.researchMap.find(r=>r.title===title)){
-      S.researchMap.push({title,category:cat,round:S.currentRound,tag:null});mapCount++;
+      S.researchMap.push({title,category:cat,round:S.currentRound,tag:null,agents:[],debateRefs:[]});mapCount++;
     }
   }
   rebuildMap();tc('map',S.researchMap.length);
@@ -2275,6 +2650,8 @@ function rebuildMap(){
     const div=document.createElement('div');div.className='map-entry';
     const hdr=document.createElement('div');hdr.className='me-hdr';
     hdr.innerHTML=`<span class="me-title">${item.title}</span><span class="me-meta" style="color:${cc}">${item.category}·R${item.round}</span>`;
+    const handoverBtn=mkBtn('handover ↓','sm-btn',()=>runHandover(i));
+    hdr.appendChild(handoverBtn);
     div.appendChild(hdr);
     const tagRow=document.createElement('div');tagRow.className='tag-row';
     [['pursue','tb-pursue'],['revisit','tb-revisit'],['needs-data','tb-needs'],['blocked','tb-blocked']].forEach(([t,cls])=>{
