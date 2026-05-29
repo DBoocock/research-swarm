@@ -658,8 +658,9 @@ The agent mandate follows the cached brief as a separate, uncached block. Editin
 ### Debate batching
 When an agent is assigned multiple debate partners, all debates are batched into a single API call. The agent receives all partner outputs in one user message and responds to each in a labelled section. This reduces API calls proportionally to the number of multi-partner agents (e.g. an agent with 3 partners: 3 calls → 1 call).
 
-### Two-stage synthesis compression
-For post-debate synthesis, generation outputs are first compressed to ~80 words each in a single batched Haiku call. The compressed summaries replace full generation outputs in the synthesis input. Debate outputs are passed at full length. This prevents synthesis input from growing unboundedly as rounds accumulate.
+### Incremental synthesis compression
+
+For post-debate synthesis, generation outputs are compressed before being passed to the synthesis agent — keeping the synthesis input bounded regardless of how many rounds have accumulated. Compression is incremental: a per-agent compressed summary is maintained in state and updated each round by compressing only the new content since the last run. Initial generation blocks are compressed to ~80 words; each reflection-extended directions block is compressed to ~60 words and appended. Two separate batched calls run per synthesis — one for agents needing initial compression, one for agents with a new extension to compress. The compression model always sees a bounded input; the summary grows linearly across rounds. Debate outputs are passed to synthesis at full length. This prevents synthesis input from growing unboundedly while preserving the chronological progression of each agent's thinking.
 
 ### Haiku for low-reasoning tasks
 Generation compression and mandate generation use Haiku (~3× cheaper than Sonnet for input and output tokens). These are simple summarisation and drafting tasks where reasoning depth does not affect quality.
@@ -688,7 +689,8 @@ There is no build step, no bundler, no package manager, and no server-side compo
 | Debate (per responding agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
 | Reflection (per debating agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
 | Generation extension (per debating agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Sequential within agent |
-| Generation compression (batched) | **Haiku 4.5** | 2.5 Flash Lite | ✅ Cached brief | — |
+| Generation compression — initial blocks (batched) | **Haiku 4.5** | 2.5 Flash Lite | ✅ Cached brief | — |
+| Generation compression — extension blocks (batched) | **Haiku 4.5** | 2.5 Flash Lite | ✅ Cached brief | — |
 
 On the Anthropic path, agent[0] runs alone first to write the prompt cache, then all remaining agents run in `Promise.all` reading from it. On the Gemini path, all agents fire in true parallel with no delays — prompt caching is Anthropic-specific and is not used on the Gemini path. Within each agent's reflection pipeline, Call 1 (Reflection) must complete before Call 2 (Generation extension) starts — agents run in parallel with each other, but the two calls within each agent are sequential.
 | Synthesis | Sonnet 4.6 / **Opus 4.6** | Cached brief only | ✅ Cached brief |

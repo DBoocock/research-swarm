@@ -322,18 +322,22 @@ DEEP+TRACTABLE directions are the priority: theoretically important and actionab
 
 ### 6.2 Two-stage synthesis for post-debate rounds
 
-After a debate round, the synthesis agent receives both generation outputs and debate outputs. Generation outputs can be long (~320–500 words each at detailed/exhaustive depth). Passing all of them directly to synthesis would make the synthesis prompt unwieldy and expensive.
+After a debate round, the synthesis agent receives both generation outputs and debate outputs. Generation outputs can be long (~320–500 words each at detailed/exhaustive depth), and grow further as reflection-extended directions accumulate across rounds. Passing all of them directly to synthesis would make the synthesis prompt unwieldy and expensive.
 
-The solution is a two-stage pipeline:
-1. **Compression**: a cheap model summarises each agent's generation output to ~80 words, preserving key technical claims
-2. **Synthesis**: receives compressed generation summaries + full debate outputs
+The solution is an incremental compression pipeline:
+1. **Compression**: a cheap model maintains a per-agent compressed summary, updated each round by compressing only the new content since the last run — approximately 80 words for an agent's initial generation block, and approximately 60 words per reflection-extended directions block appended in subsequent rounds. The compression model always sees a bounded input; the accumulated summary grows linearly across rounds.
+2. **Synthesis**: receives the accumulated compressed summaries + full debate outputs.
+
+Two separate batched compression calls run per synthesis:
+- **Batch 1 — initial-block compression**: agents with no cached summary yet (all agents on the first post-debate synthesis; newly joined agents thereafter).
+- **Batch 2 — extension-block compression**: agents whose generation record has a new extension block since the last compression. By invariant, always exactly one new block per qualifying agent per round.
 
 ```mermaid
 flowchart LR
-    G1["Agent 1\ngeneration\n~400 words"] --> C
-    G2["Agent 2\ngeneration\n~400 words"] --> C
-    Gn["Agent N\ngeneration\n~400 words"] --> C
-    C["Compression\none batched call\n~80 words each"] --> S
+    G1["Agent 1\ngeneration\n~400 words\n+ extensions"] --> C
+    G2["Agent 2\ngeneration\n~400 words\n+ extensions"] --> C
+    Gn["Agent N\ngeneration\n~400 words\n+ extensions"] --> C
+    C["Incremental compression\ntwo batched calls\n~80w initial + ~60w per extension\naccumulates across rounds"] --> S
     D1["Debate pair 1\nfull output"] --> S
     D2["Debate pair 2\nfull output"] --> S
     Dn["Debate pair N\nfull output"] --> S
@@ -341,7 +345,10 @@ flowchart LR
 ```
 
 **Design decision — why compress generation but not debate?**
-The primary motivation is cost: generation outputs can be long (~320–500 words each at detailed/exhaustive depth), and compressing them to ~80 words before synthesis substantially reduces the synthesis prompt size and therefore the API cost. The rationale for compressing generation but *not* debate is that debate outputs contain the specific claims, exact incompatibilities, and precise framework divergences that the synthesis agent needs in full — compressing them risks losing exactly the information that makes debate valuable. Generation outputs, by contrast, carry a signal (which frameworks are being proposed and why) that is more robust to summarisation.
+The primary motivation is cost: generation outputs can be long (~320–500 words each at detailed/exhaustive depth), and compressing them before synthesis substantially reduces the synthesis prompt size and therefore the API cost. The rationale for compressing generation but *not* debate is that debate outputs contain the specific claims, exact incompatibilities, and precise framework divergences that the synthesis agent needs in full — compressing them risks losing exactly the information that makes debate valuable. Generation outputs, by contrast, carry a signal (which frameworks are being proposed and why) that is more robust to summarisation.
+
+**Why incremental rather than full recompression each round?**
+With the reflection round enabled, each agent's generation record grows each round as extension blocks accumulate. Recompressing the full record each round against a fixed word budget causes earlier directions to be dropped in favour of recent content — with no visible signal at synthesis. Incremental compression avoids this: the initial summary is computed once and stored; each new extension block is compressed separately and appended. Earlier content is never competing against later content for the same word budget. Chronological order is preserved naturally, and the total summary length grows predictably.
 
 This is a pragmatic choice, not a validated one. Whether the quality of synthesis outputs degrades meaningfully due to generation compression is unknown. Issue #2 (compression toggle) proposes a user-facing control to disable compression and compare synthesis quality directly.
 
@@ -504,7 +511,7 @@ The prompt asks for structured output using delimited `REBUTTAL TO [Name]:` sect
 
 **Call 2 — Generation extension**
 
-The agent receives its original generation output plus the full reflection output from Call 1 (rebuttals received, what critiques generated taught the agent, unlocked directions). The prompt asks it to generate new or deepened research directions based on what it learned — directions that either were blocked before and are now unlocked, or that go deeper than the original generation given the new understanding. The output is **appended to `S.currentGen[agentId]`**, making it immediately available to the synthesis agent and the meta-agent for the current round.
+The agent receives its original generation output plus the full reflection output from Call 1 (rebuttals received, what critiques generated taught the agent, unlocked directions). The prompt asks it to generate new or deepened research directions based on what it learned — directions that either were blocked before and are now unlocked, or that go deeper than the original generation given the new understanding. The output is **appended to `S.genBlocks[agentId].extensions`** as a new structured entry with the current round number, making it immediately available to the synthesis agent and the meta-agent for the current round.
 
 The `learning` field from Call 1 is the richest input for generation extension — it captures what the agent now understands about its own framework's limits and opportunities. Its value is expressed through the appended generation output rather than carried forward directly into future debate calls.
 
@@ -514,11 +521,11 @@ The disciplinary constraint is intentionally permissive: *"remain largely within
 flowchart TD
     subgraph "Reflection round — per debating agent"
         C1["Call 1 — Reflection\nStrong model\nAll debates this agent was in, both sides\n→ REBUTTAL TO [Name]: sections per critique received\n→ framework learning per critique generated\n→ cross-exchange synthesis"]
-        C2["Call 2 — Generation extension\nStrong model\nOriginal generation + reflection output\n→ new or deepened directions\n→ appended to currentGen"]
+        C2["Call 2 — Generation extension\nStrong model\nOriginal generation + reflection output\n→ new or deepened directions\n→ appended to genBlocks[agentId].extensions"]
         C1 --> C2
     end
     D["Debate outputs\ncurrent round"] --> C1
-    C2 --> GEN["currentGen — appended\n→ synthesis agent\n→ meta-agent"]
+    C2 --> GEN["genBlocks — extension appended\n→ synthesis agent (via flatCompressed)\n→ meta-agent"]
     C1 --> REF["agentReflections — history arrays\n→ buildPairHistory() injection\nbefore future debates"]
     NA["New agent\nno prior debate"] --> SKIP["Skip reflection round\nno injection"]
 ```

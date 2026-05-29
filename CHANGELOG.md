@@ -1,5 +1,70 @@
 # Changelog
 
+## v4.7.0
+
+### Incremental generation compression — structured generation state (issue #16)
+
+#### Problem
+
+`compressGenerationOutputs()` was recompressing each agent's full generation
+output on every post-debate synthesis call. With reflections enabled, each
+agent's output grows each round as `REFLECTION-EXTENDED DIRECTIONS` blocks
+accumulate. By round 5–10, the compression model was distilling 3–5× more
+content into the same 80-word budget, causing earlier directions to be dropped
+in favour of more recent content with no visible signal at synthesis.
+
+A second structural problem: `S.currentGen[agentId]` was a flat string that
+mixed initial generation text and extension blocks separated by delimiter text,
+creating fragile coupling between the delimiter format written in
+`runReflectionRound()` and the parser in `compressGenerationOutputs()`.
+
+#### Solution — structured state and incremental compression
+
+`S.currentGen` (flat string per agent) is replaced by two structured fields:
+
+- `S.genBlocks[agentId]`: `{ initial: {round, text}, extensions: [{round, text}] }`
+  — the full chronological generation record, structured by block.
+- `S.compressedGen[agentId]`: `{ initialSummary: {round, summary}, extensionSummaries: [{round, summary}] }`
+  — an incremental compressed summary, one entry per round, accumulating across rounds.
+
+Two helper functions reconstruct labelled chronological text on demand:
+- `flatGen(agentId)` — full uncompressed text, for the genext prompt and no-debate synthesis; reads live `S.genBlocks`
+- `flatCompressed(agentId)` — accumulated compressed summary, for post-debate synthesis; reads live `S.compressedGen`
+
+Both use uniform round labels on initial and extension blocks:
+```
+--- INITIAL GENERATION (round N) ---
+--- REFLECTION-EXTENDED DIRECTIONS (round M) ---
+```
+
+`compressGenerationOutputs()` now runs two separate batched API calls per synthesis:
+- **Batch 1 — initial-block compression (~80 words each)**: agents with no cached summary. On the first post-debate synthesis this is all agents; thereafter only newly joined agents.
+- **Batch 2 — extension-block compression (~60 words each)**: agents whose `genBlocks` has more extensions than their `compressedGen` has entries. Always exactly one uncached extension per qualifying agent by invariant.
+
+The compression model always sees a bounded input. The accumulated summary grows linearly (~80 + N×60 words after N rounds) and preserves chronological order naturally.
+
+#### Removal of `generationOutputs`
+
+`generationOutputs` has been removed from `saveRound()` — it was a derived
+value redundant with `genBlocks`. `renderLog()` and `buildMd()` reconstruct
+flat text inline from `r.genBlocks` at read time. `saveRound()` now stores
+only `genBlocks`.
+
+#### Export and import
+
+Both `S.genBlocks` and `S.compressedGen` are exported in `buildExportData()`
+and restored in `importSession()`. Sessions exported after this change can be
+fully continued — generation state, compressed summaries, and round labels are
+all restored on import. This resolves the generation-state aspect of issue #4.
+
+#### Removal of `compressionMaxTok` scaling
+
+The `compressionMaxTok` reflections-specific scaling workaround introduced in
+v4.6.1 (`max(600, entries.length * 200)`) is removed — bounded compression
+inputs make it unnecessary.
+
+---
+
 ## v4.6.1
 
 ### Bug fixes — reflection round post-release issues
