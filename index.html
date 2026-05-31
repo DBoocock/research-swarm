@@ -1810,10 +1810,8 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     sc.querySelector('.badge').className='badge b-done';sc.querySelector('.badge').textContent='done';
     updateRoundHdr(hdr,'done');tc('syn',1);
     setStatus('Synthesis complete. Running meta-agent...');
-    const mapLengthBefore = S.researchMap.length;
-    parseSynthesis(result);
-    const newDirections = S.researchMap.slice(mapLengthBefore);
-    await runAttribution(newDirections);
+    const {newEntries, reusedEntries} = parseSynthesis(result);
+    await runAttribution([...newEntries, ...reusedEntries]);
     await runMeta(result);
     saveRound(includeDebate);
     autoExportJson();
@@ -2690,6 +2688,8 @@ function parseSynthesis(text){
   const existingMap = [...S.researchMap];
   let mapCount = 0;
   let lastNewEntry = null;
+  const newEntries = [];
+  const reusedEntries = [];
 
   for (const line of text.split('\n')) {
     const dirMatch = line.match(/\[([A-Z]+)\+([A-Z]+)\]\s*(.+)/);
@@ -2716,9 +2716,14 @@ function parseSynthesis(text){
 
         };
         S.researchMap.push(entry);
+        newEntries.push(entry);
         lastNewEntry = entry;
         mapCount++;
       } else {
+        if (rawTitle) {
+          const existing = S.researchMap.find(r => r.title === rawTitle);
+          if (existing) reusedEntries.push(existing);
+        }
         lastNewEntry = null;
       }
     } else {
@@ -2766,13 +2771,16 @@ function parseSynthesis(text){
     else sb.push(t);
   }
   S.matrix={dt,db,st,sb};rebuildMatrix();
+  return {newEntries, reusedEntries};
 }
 
 function rebuildMap(){
   const p=document.getElementById('panel-map');p.innerHTML='';
   if(!S.researchMap.length){p.innerHTML='<div class="empty-state"><span class="big">Research map</span>Directions appear here after synthesis.</div>';return;}
   p.appendChild(makeSectionLabel('Research directions — tag for tracking'));
-  S.researchMap.forEach((item,i)=>{
+  const mapById=Object.fromEntries(S.researchMap.map(r=>[r.id,r]));
+  const roots=S.researchMap.filter(r=>!r.parentIds.length||!r.parentIds.some(pid=>mapById[pid]));
+  roots.forEach((item)=>{
     const cc=item.category.includes('DEEP')&&item.category.includes('TRACTABLE')?'var(--success)':item.category.includes('DEEP')?'var(--accent3)':item.category.includes('TRACTABLE')?'var(--accent)':'var(--text3)';
     const div=document.createElement('div');div.className='map-entry';
     const hdr=document.createElement('div');hdr.className='me-hdr';
@@ -2786,19 +2794,25 @@ function rebuildMap(){
       tagRow.appendChild(tb);
     });
     div.appendChild(tagRow);
-    const children=S.researchMap.filter(r=>r.parentIds.includes(item.id));
-    if(children.length){
-      const childList=document.createElement('div');childList.className='me-children';
-      children.forEach(child=>{
-        const childCc=child.category.includes('DEEP')&&child.category.includes('TRACTABLE')?'var(--success)':child.category.includes('DEEP')?'var(--accent3)':child.category.includes('TRACTABLE')?'var(--accent)':'var(--text3)';
-        const childRow=document.createElement('div');childRow.className='me-child';
-        childRow.innerHTML=`<span class="me-child-arrow">↳</span><span class="me-child-title">${child.title}</span><span class="me-meta" style="color:${childCc}"> ${child.category}·R${child.round}</span>`;
-        childList.appendChild(childRow);
-      });
-      div.appendChild(childList);
-    }
+    appendChildren(div, item, 1);
     p.appendChild(div);
   });
+}
+function appendChildren(container, parentItem, depth){
+  if(depth>8)return;
+  const children=S.researchMap.filter(r=>r.parentIds.includes(parentItem.id));
+  if(!children.length)return;
+  const childList=document.createElement('div');childList.className='me-children';
+  if(depth>1)childList.style.marginLeft='12px';
+  children.forEach(child=>{
+    const childCc=child.category.includes('DEEP')&&child.category.includes('TRACTABLE')?'var(--success)':child.category.includes('DEEP')?'var(--accent3)':child.category.includes('TRACTABLE')?'var(--accent)':'var(--text3)';
+    const childRow=document.createElement('div');childRow.className='me-child';
+    childRow.innerHTML=`<span class="me-child-arrow">↳</span><span class="me-child-title">${child.title}</span><span class="me-meta" style="color:${childCc}"> ${child.category}·R${child.round}</span>`;
+    childRow.appendChild(mkBtn('handover ↓','sm-btn',()=>runHandover(child.id)));
+    childList.appendChild(childRow);
+    appendChildren(childList, child, depth+1);
+  });
+  container.appendChild(childList);
 }
 function setTag(id,tag,cls,btn){
   const entry=S.researchMap.find(r=>r.id===id);
