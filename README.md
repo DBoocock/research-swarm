@@ -377,9 +377,11 @@ The roster agent is best run before starting a new session, after significantly 
 
 ### Research map
 
-Every synthesis extracts research directions tagged with their depth/tractability category. These accumulate across all rounds in the **Research Map** tab — duplicate directions are deduplicated automatically.
+Every synthesis extracts research directions tagged with their depth/tractability category. These accumulate across all rounds in the **Research Map** tab. Each direction carries a stable identifier (`R{round}-{position}`) assigned at parse time.
 
-Each direction also carries structured attribution data recorded at synthesis time: which agents contributed substantively to it, and which debate exchanges brought it into focus. This attribution is used to pre-load relevant context when generating a handover document.
+From the second synthesis onward, the synthesis model sees the existing map as a numbered list and is instructed to handle each direction it proposes in one of four ways: reuse the exact title string if the direction is unchanged; annotate it with `EXTENDS: N` (on the immediately following line) if it refines an existing direction; propose a new title with no annotation if it is genuinely new. Directions annotated with `EXTENDS: N` are shown indented beneath their parent direction in the map panel, making the lineage of the research agenda visible across rounds.
+
+Each direction also carries structured attribution data recorded at synthesis time: which agents contributed substantively (`{id, round}[]` — recording both the agent and the round they were attributed), and which debate exchanges brought it into focus. Attribution accumulates across rounds — a direction first identified in round 1 may gain additional attributed agents in later rounds as it continues to be developed. This attribution is used to pre-load relevant context when generating a handover document.
 
 Each direction can be tagged:
 

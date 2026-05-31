@@ -1,5 +1,52 @@
 # Changelog
 
+## v4.9.0
+
+### Direction identity, lineage tracking, and synthesis map awareness (issue #21)
+
+#### Problem
+
+The research map deduplicated directions by exact title string equality. The synthesis model generated titles from scratch each round without seeing the existing map, so paraphrases of prior directions passed the deduplication check unimpeded. Research map entries also lacked stable identifiers, creating a latent index-drift bug: handover and tag buttons held closures over array indices that became stale after any splice or reorder.
+
+#### Stable direction IDs
+
+Each research map entry now carries a stable `id` field: `R{round}-{position}`, e.g. `R2-3`, assigned at parse time and never changed. `runHandover` and `setTag` now look up entries via `find(r => r.id === id)` rather than array index, making all button closures robust to array mutations.
+
+#### Attribution schema change — `{id, round}[]`
+
+`entry.agents` is now `{id: string, round: number}[]` rather than `string[]`. The `round` field records which synthesis round an agent was attributed to a direction, enabling round-capped generation context in handover documents via `flatCompressedUpTo(agentId, maxRound)`. Sessions exported before this change are backfilled on import: `string[]` arrays are migrated to `{id, round}[]` using `entry.round` as the attributed round. Attribution now runs on both new directions and directions the synthesis model explicitly reused (exact title match), so later-round contributions accumulate correctly in existing entries.
+
+#### Synthesis prompt awareness and lineage
+
+`parseSynthesis` is refactored from a `matchAll` loop to a line-by-line pass. Each new entry gets its full schema at creation time including `id`, `parentIds: []`. The synthesis prompt now has two clean variants:
+
+- **First synthesis (empty map)**: plain directions block with category definitions; no lineage instructions
+- **Subsequent syntheses**: the existing map is prepended as a numbered index list; the synthesis model is instructed to reuse exact title strings for unchanged directions and to annotate refinements with `EXTENDS: N` on the immediately following line
+
+`EXTENDS: N` annotations are validated against a pre-addition snapshot of the existing map and written to `entry.parentIds`. `parseSynthesis` now returns `{newEntries, reusedEntries}` explicitly, eliminating the `mapLengthBefore` length-comparison pattern. Category labels are parsed permissively via `includes()` rather than exact equality, handling tokenisation-level stutters such as `[DEDEEP+TRACTABLE]`. `EXTENDS:` detection tolerates leading whitespace (`^\s*EXTENDS:` rather than `^EXTENDS:`).
+
+#### Post-hoc deduplication removed
+
+A cheap-model paraphrase-detection call was prototyped but removed after testing revealed it introduced more false merges (absorbing refinements as paraphrases) than genuine paraphrases it caught. The synthesis model with full round context is better placed to detect paraphrases. `mergedFromIds` field added and removed in the same release.
+
+#### Lineage display
+
+The map panel renders child directions (entries whose `parentIds` includes the parent's `id`) as indented `↳ Title CATEGORY·Rn` rows beneath their parent's card. The handover context renders the same hierarchy as indented text, allowing the handover model to cite lineage relationships explicitly.
+
+#### State changes
+
+`S.researchMap` entries carry two new fields:
+- `id: string` — stable identifier `R{round}-{position}`
+- `parentIds: string[]` — IDs of directions this one refines or extends
+
+`entry.agents` schema changed from `string[]` to `{id, round}[]`. `importSession` backfills all new schema fields in a single pass, including migration of legacy `string[]` agent arrays.
+
+#### Documentation
+
+`docs/METHODOLOGY.md` Section 10 (The accumulation layer) expanded with five subsections covering the entry schema, the four-case direction identity taxonomy (with known-limitation caveat), the synthesis-to-map pipeline, round-capped handover context, and lineage display. Section 6.2 updated to reflect `{id, round}[]` and reuse-attribution. `docs/issue-round-specific-generation-filtering.md` added to track a future refinement.
+
+---
+
 ## v4.8.0
 
 ### Direction handover documents (issue #11)
@@ -32,7 +79,7 @@ run). Attribution failure is non-fatal: the session continues and the handover f
 falls back to full-context mode.
 
 `S.researchMap` entries now carry two new fields:
-- `agents: [agentId, ...]` — agent IDs attributed to this direction, merged across rounds
+- `agents: [agentId, ...]` — agent IDs attributed to this direction, merged across rounds *(schema superseded in v4.9.0 by `{id, round}[]`)*
 - `debateRefs: [{round, key}, ...]` — debate pair keys attributed to this direction, merged across rounds
 
 The attribution call is available to the meta-agent, which can use attribution data

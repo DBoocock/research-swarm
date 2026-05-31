@@ -322,9 +322,9 @@ DEEP+TRACTABLE directions are the priority: theoretically important and actionab
 
 ### 6.2 Direction attribution
 
-Each new research direction added to the research map carries structured attribution data: which agents contributed substantively to the direction, and which debate exchanges brought it into focus. This attribution is determined by a dedicated cheap-model call that runs immediately after synthesis parses new directions, before the meta-agent fires.
+Each research direction in the research map carries structured attribution data: which agents contributed substantively to the direction, and which debate exchanges brought it into focus. Attribution is stored as `{id, round}[]` — agent ID paired with the round in which that agent was attributed — rather than a flat list of agent IDs. This round-level granularity is what allows the handover to cap each agent's generation context at the round they were actually working on this direction (see section 10.4).
 
-The attribution call receives the new direction titles (enumerated by code-generated index), the complete set of valid agent IDs and debate pair keys for the current round, and a prompt asking the model to classify which agents and debates contributed substantively to each direction. The model selects from a closed, explicitly enumerated set supplied by the code — it does not invent identifiers. Invalid or unrecognised identifiers are discarded at parse time. Attributions from later rounds are merged into existing research map entries rather than replacing them: a direction first identified in round 1 may accumulate additional supporting agent outputs and debate exchanges in rounds 2 and 3.
+Attribution is determined by a dedicated cheap-model call that runs immediately after synthesis parses each round's directions, before the meta-agent fires. The call processes both newly added directions and directions the synthesis model explicitly reused by exact title — so that later rounds can extend the attribution record of a direction first identified in an earlier round. The attribution call receives the direction titles (enumerated by code-generated index), the complete set of valid agent IDs and debate pair keys for the current round, and a prompt asking the model to classify which agents and debates contributed substantively to each direction. The model selects from a closed, explicitly enumerated set supplied by the code — it does not invent identifiers. Invalid or unrecognised identifiers are discarded at parse time. New attributions are merged into existing entries rather than replacing them using a union operation that deduplicates on `id+round` composite key.
 
 Running attribution as a separate cheap-model call rather than embedding it in the synthesis output preserves the synthesis format, avoids adding cognitive load to the synthesis model, and isolates a failure in attribution from the synthesis output itself.
 
@@ -609,13 +609,83 @@ The reflection round design is motivated by analogy with human learning in colla
 
 Across all rounds, the system maintains three accumulating data structures:
 
-**Research map**: all research directions proposed by the synthesis agent across all rounds, tagged by depth and tractability, with attribution data recording which agents and debate exchanges contributed substantively to each direction. Deduplicated automatically, with attributions merged across rounds. Provides a growing, attributed map of the theoretical agenda space.
+**Research map**: all research directions identified by the synthesis agent across all rounds, tagged by depth and tractability, with attribution data and lineage records. Provides a growing, attributed, hierarchically structured map of the theoretical agenda space.
 
 **Contradiction tracker**: all explicitly structured contradictions identified by the synthesis agent. Each entry records the two agents, their incompatible claims, and the proposed resolution method. Provides a record of where the theoretical landscape has genuine fault lines.
 
 **Overlap matrix**: pairwise estimates of productive debate potential between agents, based on mandate text similarity (Jaccard on words >5 characters). Updated by the roster agent. Provides a rough guide to which pairings are likely to be productive.
 
 These structures are the session's primary research output — more useful than any individual agent output or debate response.
+
+### 10.1 Research map entry schema
+
+Each entry carries:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Stable identifier: `R{round}-{position}`, e.g. `R2-3`. Assigned at parse time; never changes. |
+| `title` | `string` | Direction title as produced by the synthesis model. |
+| `category` | `string` | One of `DEEP+TRACTABLE`, `DEEP+BLOCKED`, `SHALLOW+TRACTABLE`, `SHALLOW+BLOCKED`. |
+| `round` | `number` | Synthesis round in which this direction was first identified. |
+| `tag` | `string\|null` | Researcher tag: `pursue`, `revisit`, `needs-data`, `blocked`, or null. |
+| `agents` | `{id, round}[]` | Which agents contributed substantively and in which round. Accumulates across rounds via union merge on `id+round` key. |
+| `debateRefs` | `{key, round}[]` | Which debate exchanges contributed and in which round. Accumulates via union merge on `key+round`. |
+| `parentIds` | `string[]` | IDs of directions this one refines or extends, as annotated by the synthesis model. |
+
+The stable `id` field prevents a latent index-drift bug: before stable IDs, the handover and tag buttons on each map card held closures over the array index. A splice or reorder would silently point those closures at the wrong entry. Stable IDs allow all lookups to use `find(r => r.id === id)` regardless of array mutations.
+
+### 10.2 Direction identity over time — the four cases
+
+From the second synthesis call onward, the prompt shows the synthesis model the existing research map as a numbered index list. The model is instructed to handle each direction it proposes according to its relationship to the existing entries. There are four possible outcomes:
+
+| Synthesis output | Map behaviour | What it means |
+|---|---|---|
+| New title, no `EXTENDS` | New entry, `parentIds=[]` | Genuinely new direction with no recorded lineage |
+| Existing title, no `EXTENDS` | No new entry; attribution updated for this round | Unchanged direction — synthesis model reused the exact title string |
+| Existing title + `EXTENDS: N` | No new entry; `EXTENDS` annotation ignored | Model attempted to annotate an existing entry — harmless, nothing changes |
+| New title + `EXTENDS: N` | New entry, `parentIds=[id of N]` | Refinement of an existing direction — new title, lineage recorded |
+
+The second row is the most important for attribution quality: when the synthesis model reuses an exact title, it is signalling that the direction is still active and being developed this round. The attribution call processes these reused entries alongside new ones, so contributions from later rounds accumulate in the existing entry's `agents` array. A direction first identified in round 1 attributed to agent A may accumulate `[{id:'A', round:1}, {id:'B', round:3}]` if agent B's round-3 outputs contributed substantially.
+
+The third row (existing title with `EXTENDS`) arises when the model attempts to annotate an existing entry. Since no new entry is created, the `EXTENDS` annotation is silently discarded — the existing entry's `parentIds` were set when it was first created and do not need re-annotation.
+
+**Known limitation — the table assumes reliable instruction-following.** The four cases partition cleanly only when the synthesis model follows the title-reuse and `EXTENDS: N` instructions precisely. In practice the synthesis model is doing genuine semantic analysis — it has just processed all generation outputs and debates — and may re-express a direction it considers "substantively unchanged" with a subtly different title based on new framing. In that case the exact-match check fails and the direction falls into row 1 (new entry, `parentIds=[]`) rather than row 2, creating a near-duplicate on the map when a reuse was intended. Similarly, the boundary between row 1 and row 4 depends on the model's judgement about what constitutes a refinement versus a genuinely new direction: a researcher might consider a row-4 entry (new title, `EXTENDS: N`) to be the same direction as its parent, just better expressed. The lineage mechanism is therefore a best-effort record of the synthesis model's stated intentions, not a guarantee of semantic deduplication. For sessions where near-duplicates appear on the map, the researcher should use the researcher-facing tag system to mark them and the handover feature to understand their relationship.
+
+### 10.3 Synthesis-to-map pipeline
+
+The synthesis model receives one of two prompt variants depending on whether the map is empty:
+
+**First synthesis (empty map):** The `RESEARCH DIRECTIONS` block shows only the four valid category labels with their axis definitions (`DEEP` = theoretically fundamental or novel; `SHALLOW` = incremental or applied; `TRACTABLE` = feasible with available data and methods now; `BLOCKED` = requires unavailable data or an unresolved theoretical prerequisite). No `EXTENDS` or title-reuse instructions appear — there is nothing to reference.
+
+**Subsequent syntheses (populated map):** The prompt prepends the existing map as a numbered index list, then adds two rules:
+- *Title reuse*: if a direction is substantively unchanged, reuse the exact title string
+- *`EXTENDS: N`*: if a direction refines an existing one, annotate the immediately following line with the integer index from the numbered list — not a name, not a round number
+
+The `parseSynthesis` function processes the synthesis output line by line. It snapshots the existing map before any additions begin — this snapshot provides the index reference for validating `EXTENDS: N` annotations. A direction is added to the map only if its cleaned title is not already present; otherwise the existing entry is flagged as reused and passed to the attribution call. `EXTENDS: N` is validated against the snapshot length; out-of-range indices are silently discarded.
+
+Category labels are parsed permissively: the regex matches any uppercase text in `[X+Y]` bracket format and normalises using keyword-contains checks (`includes('DEEP')`, `includes('TRACTABLE')` etc.). This handles tokenisation-level stutters such as `[DEDEEP+TRACTABLE]` that an exact-match regex would silently drop.
+
+### 10.4 Round-capped handover context
+
+The `{id, round}[]` attribution schema enables targeted context scoping in handover documents. For each agent attributed to a direction, `buildHandoverContext` caps the compressed generation output at the highest round in which that agent was attributed:
+
+```javascript
+const maxRound = Math.max(
+  ...(item.agents||[]).filter(a => a.id === id).map(a => a.round),
+  1
+);
+const text = flatCompressedUpTo(id, maxRound) || flatGen(id);
+```
+
+`flatCompressedUpTo` returns the agent's initial generation summary plus all reflection-extension summaries up to `maxRound`. An agent attributed in rounds 1 and 3 contributes their initial output and their round-3 extension to the handover context. Round-2 extensions (produced while working on other directions) are included too, since the ceiling approach is conservative — it risks including some noise but never excludes content that was active when the agent was attributed. A tighter round-set approach (include only rounds 1 and 3, not 2) is a noted future refinement; see `docs/issue-round-specific-generation-filtering.md`.
+
+### 10.5 Lineage display
+
+Only root entries — those with no `parentIds` that resolve to a current map entry — are rendered as full standalone cards in the map panel. Child entries (directions with a resolvable parent) appear exclusively as `↳ Title CATEGORY·Rn` rows beneath their parent's card, with a handover button; they do not generate separate standalone cards. This prevents each direction from appearing twice and keeps the map readable as the lineage graph deepens across rounds.
+
+The child rendering is recursive: each child row is followed by its own children (grandchildren of the parent card), each indented a further 12 px to the right. A depth guard of 8 prevents runaway recursion in the unlikely event of a circular reference. The tag buttons are available only on standalone root cards; tagging of child directions is a noted future enhancement.
+
+The handover context renders the same hierarchy as indented plain text for the handover model, with each level of parent–child nesting represented by two-space indentation. This allows the handover model to cite lineage relationships explicitly rather than inferring them from title similarity.
 
 ---
 
