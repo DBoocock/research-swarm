@@ -191,6 +191,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 .tb-revisit{background:rgba(122,158,200,.12);color:var(--accent3);border-color:rgba(122,158,200,.3);}
 .tb-needs{background:rgba(200,160,122,.12);color:var(--warn);border-color:rgba(200,160,122,.3);}
 .tb-blocked{background:rgba(200,122,122,.1);color:var(--danger);border-color:rgba(200,122,122,.25);}
+/* Lineage display */
+.me-children{margin-top:5px;display:flex;flex-direction:column;gap:2px;}
+.me-child{display:flex;align-items:baseline;gap:4px;padding:2px 4px;font-size:11px;}
+.me-child-arrow{color:var(--text3);flex-shrink:0;}
+.me-child-title{color:var(--text2);flex:1;}
 
 /* Contradictions */
 .contra-item{background:var(--bg2);border:1px solid rgba(200,122,122,.25);border-radius:4px;padding:8px 11px;flex-shrink:0;}
@@ -705,9 +710,9 @@ const MODELS={
   meta:        {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
   roster:      {anthropic:'claude-sonnet-4-6',  gemini:'gemini-2.5-flash'}, // anthropic: overridden by S.synthesisModel
   handover:    {anthropic:'claude-sonnet-4-6',        gemini:'gemini-2.5-flash'},      // strong model; Sonnet/Opus toggle applies — synthesis-tier reasoning task
-  attribution: {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap model — closed-set classification, not reasoning
-  compression: {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap task: summarisation
-  mandate:     {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap task: constrained rewriting
+  attribution:    {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap model — closed-set classification, not reasoning
+  compression:    {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap task: summarisation
+  mandate:        {anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite'}, // cheap task: constrained rewriting
 };
 
 const DEPTH_DIRS={
@@ -760,6 +765,30 @@ function buildCachedBlock(){
   return brief.sysCtx+'\n\n'+brief.resCtx+'\n\n'+brief.dataCtx;
 }
 
+// ══════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ══════════════════════════════════════════════════════════
+function unionBy(a, b, keyFn) {
+  const seen = new Set(a.map(keyFn));
+  return [...a, ...b.filter(item => {
+    const k = keyFn(item);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  })];
+}
+
+function buildMapBlock(entries, {includeAgents = false} = {}) {
+  return entries.map((r, i) => {
+    let line = `${i}: [${r.category}] ${r.title}  (R${r.round})`;
+    if (includeAgents && r.agents.length) {
+      const agentIds = [...new Set(r.agents.map(a => a.id))];
+      line += `, agents: ${agentIds.join(', ')}`;
+    }
+    return line;
+  }).join('\n');
+}
+
 function flatGen(agentId){
   const blocks=S.genBlocks[agentId];
   if(!blocks)return'';
@@ -773,6 +802,20 @@ function flatCompressed(agentId){
   if(!c)return'';
   let out=`--- INITIAL GENERATION (round ${c.initialSummary.round}) ---\n${c.initialSummary.summary}`;
   c.extensionSummaries.forEach(ext=>{out+=`\n\n--- REFLECTION-EXTENDED DIRECTIONS (round ${ext.round}) ---\n${ext.summary}`;});
+  return out;
+}
+
+// Returns compressed generation for agentId, capped at maxRound.
+// Fallback to flatGen (all rounds, no cap) when compression hasn't run yet.
+function flatCompressedUpTo(agentId, maxRound) {
+  const c = S.compressedGen[agentId];
+  if (!c) return flatGen(agentId);
+  let out = `--- INITIAL GENERATION (round ${c.initialSummary.round}) ---\n${c.initialSummary.summary}`;
+  c.extensionSummaries
+    .filter(ext => ext.round <= maxRound)
+    .forEach(ext => {
+      out += `\n\n--- REFLECTION-EXTENDED DIRECTIONS (round ${ext.round}) ---\n${ext.summary}`;
+    });
   return out;
 }
 
@@ -1694,16 +1737,42 @@ async function runSynthesis(includeDebate){
         });
     }
 
+    const directionsSection = S.researchMap.length === 0
+      ? `RESEARCH DIRECTIONS:
+List 4-6 directions. Each title must be under 20 words. Classify each direction using two axes:
+  DEEP = theoretically fundamental or novel; SHALLOW = incremental or applied.
+  TRACTABLE = feasible with available data and methods now; BLOCKED = requires unavailable data or an unresolved theoretical prerequisite.
+Category must be one of: DEEP+TRACTABLE, DEEP+BLOCKED, SHALLOW+TRACTABLE, SHALLOW+BLOCKED. Use this format:
+
+  [DEEP+TRACTABLE] Title
+  [DEEP+BLOCKED] Title
+  [SHALLOW+TRACTABLE] Title
+  [SHALLOW+BLOCKED] Title`
+      : `EXISTING RESEARCH MAP — directions already identified across prior rounds:
+${buildMapBlock(S.researchMap)}
+
+RESEARCH DIRECTIONS:
+List 4-6 directions. Each title must be under 20 words. Classify each direction using two axes:
+  DEEP = theoretically fundamental or novel; SHALLOW = incremental or applied.
+  TRACTABLE = feasible with available data and methods now; BLOCKED = requires unavailable data or an unresolved theoretical prerequisite.
+Category must be one of: DEEP+TRACTABLE, DEEP+BLOCKED, SHALLOW+TRACTABLE, SHALLOW+BLOCKED. Use this format:
+
+  [DEEP+TRACTABLE] Title
+  [DEEP+BLOCKED] Title
+  [SHALLOW+TRACTABLE] Title
+  [SHALLOW+BLOCKED] Title
+
+If a direction builds on or refines an existing direction from the map above (adds a method, narrows scope), add on the immediately following line:
+  EXTENDS: N   (where N is the integer index from the numbered list above — not a name, not a round number)
+
+If a direction is substantively unchanged from an existing one (same research question, same primary method), reuse the exact title string from the map — no annotation needed.
+Do not suppress genuinely new directions to avoid a match.`;
+
     const synthPrompt=`You have received outputs from a multi-agent theoretical research swarm. All outputs:\n${allOutputs}
 
 Write a concise synthesis using these exact sections. Keep strictly to the word limits — do not pad.
 
-RESEARCH DIRECTIONS (titles only, no explanation):
-[DEEP+TRACTABLE] Title
-[DEEP+BLOCKED] Title
-[SHALLOW+TRACTABLE] Title
-[SHALLOW+BLOCKED] Title
-(4-6 directions, each title under 20 words)
+${directionsSection}
 
 CONVERGENCES (60 words max): 2-3 mechanisms multiple agents independently converge on. One sentence each.
 
@@ -1741,9 +1810,9 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     sc.querySelector('.badge').className='badge b-done';sc.querySelector('.badge').textContent='done';
     updateRoundHdr(hdr,'done');tc('syn',1);
     setStatus('Synthesis complete. Running meta-agent...');
-    const mapLengthBefore=S.researchMap.length;
+    const mapLengthBefore = S.researchMap.length;
     parseSynthesis(result);
-    const newDirections=S.researchMap.slice(mapLengthBefore);
+    const newDirections = S.researchMap.slice(mapLengthBefore);
     await runAttribution(newDirections);
     await runMeta(result);
     saveRound(includeDebate);
@@ -1931,7 +2000,8 @@ Use an empty list [] where nothing contributed. Output only these lines — no e
 
       // Direct reference to the map entry — no lookup by title needed
       const entry=newDirections[idx];
-      entry.agents=[...new Set([...entry.agents,...agentIds])];
+      const newAttrs = agentIds.map(id => ({id, round: S.currentRound}));
+      entry.agents = unionBy(entry.agents, newAttrs, a => `${a.id}:${a.round}`);
       entry.debateRefs=[
         ...entry.debateRefs,
         ...debateKeys
@@ -1950,9 +2020,10 @@ Use an empty list [] where nothing contributed. Output only these lines — no e
 // ══════════════════════════════════════════════════════════
 function buildHandoverContext(item){
   // Agent profiles — attributed agents if available, all active as fallback
-  const profileAgents=(item.agents||[]).length
-    ?agents.filter(a=>item.agents.includes(a.id))
-    :agents.filter(a=>S.agentStatuses[a.id]!=='retired');
+  const attributedIds = new Set((item.agents||[]).map(a => a.id));
+  const profileAgents = attributedIds.size
+    ? agents.filter(a => attributedIds.has(a.id))
+    : agents.filter(a => S.agentStatuses[a.id] !== 'retired');
 
   const agentProfiles=profileAgents
     .map(a=>`${a.name} (id: ${a.id})\n${a.mandate}`)
@@ -1963,15 +2034,20 @@ function buildHandoverContext(item){
     .map(r=>`=== SYNTHESIS: Round ${r.round} ===\n${r.synthesis||'(none)'}`)
     .join('\n\n');
 
-  // Compressed generation outputs — fall back to full gen if compression not yet run
-  const compressedGen=Object.keys(S.genBlocks)
-    .filter(id=>S.agentStatuses[id]!=='retired')
-    .map(id=>{
-      const name=agents.find(a=>a.id===id)?.name||id;
-      const text=flatCompressed(id)||flatGen(id); // flatCompressed is empty before first post-debate synthesis
-      return`=== ${name.toUpperCase()} ===\n${text}`;
-    })
-    .join('\n\n');
+  // Compressed generation outputs — round-capped per attributed agent
+  const genAgentIds = attributedIds.size
+    ? [...attributedIds]
+    : Object.keys(S.genBlocks).filter(id => S.agentStatuses[id] !== 'retired');
+
+  const compressedGen = genAgentIds.map(id => {
+    const name = agents.find(a => a.id === id)?.name || id;
+    const maxRound = Math.max(
+      ...(item.agents||[]).filter(a => a.id === id).map(a => a.round),
+      1
+    );
+    const text = flatCompressedUpTo(id, maxRound) || flatGen(id);
+    return `=== ${name.toUpperCase()} ===\n${text}`;
+  }).join('\n\n');
 
   // Full text of attributed debate outputs
   const attributedDebate=(item.debateRefs||[])
@@ -1992,17 +2068,24 @@ function buildHandoverContext(item){
         .join('\n\n')
     :'(none recorded)';
 
-  // Research map — all directions with attribution names where available
-  const researchMap=S.researchMap
-    .map(r=>{
-      let line=`[${r.category}] ${r.title} (Round ${r.round}${r.tag?', '+r.tag:''})`;
-      if(r.agents&&r.agents.length){
-        const names=r.agents.map(id=>agents.find(a=>a.id===id)?.name||id).join(', ');
-        line+=` — agents: ${names}`;
-      }
-      return line;
-    })
-    .join('\n');
+  // Research map — rendered as indented hierarchy for the handover model
+  const mapById=Object.fromEntries(S.researchMap.map(r=>[r.id,r]));
+  const roots=S.researchMap.filter(r=>
+    !r.parentIds.length||!r.parentIds.some(pid=>mapById[pid])
+  );
+  function renderMapEntry(r,depth){
+    const indent='  '.repeat(depth);
+    let line=`${indent}[${r.category}] ${r.title} (Round ${r.round}${r.tag?', '+r.tag:''})`;
+    if(r.agents&&r.agents.length){
+      const attrNames=r.agents
+        .map(a=>`${agents.find(ag=>ag.id===a.id)?.name||a.id} (R${a.round})`)
+        .join(', ');
+      line+=` — agents: ${attrNames}`;
+    }
+    const children=S.researchMap.filter(c=>c.parentIds.includes(r.id));
+    return[line,...children.map(c=>renderMapEntry(c,depth+1))].join('\n');
+  }
+  const researchMap=roots.map(r=>renderMapEntry(r,0)).join('\n');
 
   return{agentProfiles,synthesisHistory,compressedGen,attributedDebate,contradictions,researchMap};
 }
@@ -2093,12 +2176,12 @@ Directions from the research map that are complementary (could be combined or se
 // ══════════════════════════════════════════════════════════
 // HANDOVER — run and modal
 // ══════════════════════════════════════════════════════════
-async function runHandover(idx){
+async function runHandover(id){
   if(!S.rounds.length){
     setStatus('Run at least one synthesis before generating a handover document.');
     return;
   }
-  const item=S.researchMap[idx];
+  const item=S.researchMap.find(r=>r.id===id);
   if(!item)return;
 
   _handoverTitle=item.title;
@@ -2604,18 +2687,59 @@ function acceptRec(i){
 // PARSE SYNTHESIS
 // ══════════════════════════════════════════════════════════
 function parseSynthesis(text){
-  // Research map — accumulate, deduplicate
-  // Strip leading asterisks/bold markdown the model adds before titles
-  let mapCount=0;
-  for(const m of text.matchAll(/\[(?:DEEP|SHALLOW)[+](?:TRACTABLE|BLOCKED)\][^\n]*/g)){
-    const line=m[0];
-    const title=line.replace(/\[.*?\]/g,'').replace(/^[\s\-–•\d.*]+/,'').trim();
-    const cat=line.match(/\[(.*?)\]/)?.[1]||'';
-    if(title&&!S.researchMap.find(r=>r.title===title)){
-      S.researchMap.push({title,category:cat,round:S.currentRound,tag:null,agents:[],debateRefs:[]});mapCount++;
+  const existingMap = [...S.researchMap];
+  let mapCount = 0;
+  let lastNewEntry = null;
+
+  for (const line of text.split('\n')) {
+    const dirMatch = line.match(/\[([A-Z]+)\+([A-Z]+)\]\s*(.+)/);
+    if (dirMatch) {
+      const depth = dirMatch[1].includes('DEEP') ? 'DEEP' : dirMatch[1].includes('SHALLOW') ? 'SHALLOW' : null;
+      const tract = dirMatch[2].includes('TRACTABLE') ? 'TRACTABLE' : dirMatch[2].includes('BLOCKED') ? 'BLOCKED' : null;
+      if (!depth || !tract) { lastNewEntry = null; continue; }
+      const cat = `${depth}+${tract}`;
+      const rawTitle = dirMatch[3]
+        .replace(/^[\s\-–•\d.*]+/, '')
+        .replace(/\*+$/, '')
+        .trim();
+
+      if (rawTitle && !S.researchMap.find(r => r.title === rawTitle)) {
+        const entry = {
+          id: `R${S.currentRound}-${mapCount}`,
+          title: rawTitle,
+          category: cat,
+          round: S.currentRound,
+          tag: null,
+          agents: [],
+          debateRefs: [],
+          parentIds: [],
+
+        };
+        S.researchMap.push(entry);
+        lastNewEntry = entry;
+        mapCount++;
+      } else {
+        lastNewEntry = null;
+      }
+    } else {
+      const extendsMatch = line.match(/^\s*EXTENDS:\s*(\d+)/);
+      if (extendsMatch && lastNewEntry) {
+        const parentIdx = parseInt(extendsMatch[1]);
+        if (parentIdx >= 0 && parentIdx < existingMap.length) {
+          const parentId = existingMap[parentIdx].id;
+          if (parentId && !lastNewEntry.parentIds.includes(parentId)) {
+            lastNewEntry.parentIds.push(parentId);
+          }
+        }
+      }
+      if (line.trim() && !extendsMatch) {
+        lastNewEntry = null;
+      }
     }
   }
-  rebuildMap();tc('map',S.researchMap.length);
+
+  rebuildMap();
+  tc('map', S.researchMap.length);
 
   // Contradictions — handle both plain and bold markdown formats:
   // "AGENT vs AGENT: ..." and "**AGENT vs. AGENT:**  ..."
@@ -2631,11 +2755,14 @@ function parseSynthesis(text){
 
   // Matrix — strip leading asterisks from titles
   const dt=[],db=[],st=[],sb=[];
-  for(const m of text.matchAll(/\[(DEEP|SHALLOW)\+(TRACTABLE|BLOCKED)\]\s*([^\n]+)/g)){
+  for(const m of text.matchAll(/\[([A-Z]+)\+([A-Z]+)\]\s*([^\n]+)/g)){
+    const depth=m[1].includes('DEEP')?'DEEP':m[1].includes('SHALLOW')?'SHALLOW':null;
+    const tract=m[2].includes('TRACTABLE')?'TRACTABLE':m[2].includes('BLOCKED')?'BLOCKED':null;
+    if(!depth||!tract)continue;
     const t=m[3].replace(/^[\s\-–•\d.*]+/,'').trim();
-    if(m[1]==='DEEP'&&m[2]==='TRACTABLE')dt.push(t);
-    else if(m[1]==='DEEP'&&m[2]==='BLOCKED')db.push(t);
-    else if(m[1]==='SHALLOW'&&m[2]==='TRACTABLE')st.push(t);
+    if(depth==='DEEP'&&tract==='TRACTABLE')dt.push(t);
+    else if(depth==='DEEP'&&tract==='BLOCKED')db.push(t);
+    else if(depth==='SHALLOW'&&tract==='TRACTABLE')st.push(t);
     else sb.push(t);
   }
   S.matrix={dt,db,st,sb};rebuildMatrix();
@@ -2650,23 +2777,36 @@ function rebuildMap(){
     const div=document.createElement('div');div.className='map-entry';
     const hdr=document.createElement('div');hdr.className='me-hdr';
     hdr.innerHTML=`<span class="me-title">${item.title}</span><span class="me-meta" style="color:${cc}">${item.category}·R${item.round}</span>`;
-    const handoverBtn=mkBtn('handover ↓','sm-btn',()=>runHandover(i));
+    const handoverBtn=mkBtn('handover ↓','sm-btn',()=>runHandover(item.id));
     hdr.appendChild(handoverBtn);
     div.appendChild(hdr);
     const tagRow=document.createElement('div');tagRow.className='tag-row';
     [['pursue','tb-pursue'],['revisit','tb-revisit'],['needs-data','tb-needs'],['blocked','tb-blocked']].forEach(([t,cls])=>{
-      const tb=mkBtn(t.replace('-',' '),`tag-btn${item.tag===t?' '+cls:''}`,()=>setTag(i,t,cls,tb));
+      const tb=mkBtn(t.replace('-',' '),`tag-btn${item.tag===t?' '+cls:''}`,()=>setTag(item.id,t,cls,tb));
       tagRow.appendChild(tb);
     });
     div.appendChild(tagRow);
+    const children=S.researchMap.filter(r=>r.parentIds.includes(item.id));
+    if(children.length){
+      const childList=document.createElement('div');childList.className='me-children';
+      children.forEach(child=>{
+        const childCc=child.category.includes('DEEP')&&child.category.includes('TRACTABLE')?'var(--success)':child.category.includes('DEEP')?'var(--accent3)':child.category.includes('TRACTABLE')?'var(--accent)':'var(--text3)';
+        const childRow=document.createElement('div');childRow.className='me-child';
+        childRow.innerHTML=`<span class="me-child-arrow">↳</span><span class="me-child-title">${child.title}</span><span class="me-meta" style="color:${childCc}"> ${child.category}·R${child.round}</span>`;
+        childList.appendChild(childRow);
+      });
+      div.appendChild(childList);
+    }
     p.appendChild(div);
   });
 }
-function setTag(i,tag,cls,btn){
-  S.researchMap[i].tag=S.researchMap[i].tag===tag?null:tag;
+function setTag(id,tag,cls,btn){
+  const entry=S.researchMap.find(r=>r.id===id);
+  if(!entry)return;
+  entry.tag=entry.tag===tag?null:tag;
   const row=btn.closest('.tag-row');
   row.querySelectorAll('.tag-btn').forEach(b=>b.className='tag-btn');
-  if(S.researchMap[i].tag)btn.className='tag-btn '+cls;
+  if(entry.tag)btn.className='tag-btn '+cls;
 }
 
 function rebuildContradictions(){
@@ -2922,7 +3062,17 @@ function importSession(event){
       }
       // Restore accumulated research intelligence
       if(data.rounds)S.rounds=[...data.rounds];
-      if(data.researchMap)S.researchMap=[...data.researchMap];
+      if(data.researchMap){
+        S.researchMap=[...data.researchMap];
+        S.researchMap.forEach((r, i) => {
+          if (r.agents && r.agents.length && typeof r.agents[0] === 'string') {
+            r.agents = r.agents.map(id => ({id, round: r.round}));
+          }
+          r.agents = r.agents || [];
+          r.id = r.id ?? `imported-${i}`;
+          r.parentIds = r.parentIds || [];
+        });
+      }
       if(data.contradictions)S.contradictions=[...data.contradictions];
       if(data.matrix)S.matrix={...data.matrix};
       if(data.overlapScores)S.overlapScores={...data.overlapScores};
