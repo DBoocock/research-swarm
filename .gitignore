@@ -20,3 +20,7 @@ output/
 literature/
 handover/
 tmp/
+# Strategic positioning document — kept out of version control while the project's
+# identity and competitive landscape are still settling. Commit when the position
+# feels earned rather than asserted. See docs/POSITIONING.md on disk.
+docs/POSITIONING.md
