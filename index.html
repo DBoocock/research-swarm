@@ -2612,7 +2612,7 @@ Write only the revised mandate text. Do not include any preamble, explanation, o
 // ══════════════════════════════════════════════════════════
 function renderPairingsPanel(){
   const panel=document.getElementById('panel-pair');panel.innerHTML='';
-  if(!S.pairingProposals.length){panel.innerHTML='<div class="empty-state"><span class="big">No proposals yet</span>Run generation and synthesis first.</div>';return;}
+  if(!S.pairingProposals.length){tc('pair',0);panel.innerHTML='<div class="empty-state"><span class="big">No proposals yet</span>Run generation and synthesis first.</div>';return;}
   panel.appendChild(makeSectionLabel(`Proposed debate pairings — round ${S.currentRound+1}`));
   panel.appendChild(makeNotice('Agents may have multiple pairings — shown as N↔ in the sidebar. Toggle pairs on/off, then launch the debate round.'));
   const wrap=document.createElement('div');wrap.className='pair-panel';
