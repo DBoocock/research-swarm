@@ -779,8 +779,8 @@ function unionBy(a, b, keyFn) {
 }
 
 function buildMapBlock(entries, {includeAgents = false} = {}) {
-  return entries.map((r, i) => {
-    let line = `${i}: [${r.category}] ${r.title}  (R${r.round})`;
+  return entries.map((r) => {
+    let line = `${r.id}: [${r.category}] ${r.title}`;
     if (includeAgents && r.agents.length) {
       const agentIds = [...new Set(r.agents.map(a => a.id))];
       line += `, agents: ${agentIds.join(', ')}`;
@@ -1763,7 +1763,7 @@ Category must be one of: DEEP+TRACTABLE, DEEP+BLOCKED, SHALLOW+TRACTABLE, SHALLO
   [SHALLOW+BLOCKED] Title
 
 If a direction builds on or refines an existing direction from the map above (adds a method, narrows scope), add on the immediately following line:
-  EXTENDS: N   (where N is the integer index from the numbered list above — not a name, not a round number)
+  EXTENDS: R1-0   (use the ID shown at the start of each line above — e.g. R1-0, R2-3 — not an integer, not a title)
 
 If a direction is substantively unchanged from an existing one (same research question, same primary method), reuse the exact title string from the map — no annotation needed.
 Do not suppress genuinely new directions to avoid a match.`;
@@ -2727,14 +2727,12 @@ function parseSynthesis(text){
         lastNewEntry = null;
       }
     } else {
-      const extendsMatch = line.match(/^\s*EXTENDS:\s*(\d+)/);
+      const extendsMatch = line.match(/^\s*EXTENDS:\s*(R\d+-\d+)/);
       if (extendsMatch && lastNewEntry) {
-        const parentIdx = parseInt(extendsMatch[1]);
-        if (parentIdx >= 0 && parentIdx < existingMap.length) {
-          const parentId = existingMap[parentIdx].id;
-          if (parentId && !lastNewEntry.parentIds.includes(parentId)) {
-            lastNewEntry.parentIds.push(parentId);
-          }
+        const parentId = extendsMatch[1];
+        const parent = existingMap.find(e => e.id === parentId);
+        if (parent && !lastNewEntry.parentIds.includes(parent.id)) {
+          lastNewEntry.parentIds.push(parent.id);
         }
       }
       if (line.trim() && !extendsMatch) {
