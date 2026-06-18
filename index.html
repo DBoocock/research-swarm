@@ -187,6 +187,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 .tag-row{display:flex;gap:3px;flex-wrap:wrap;}
 .tag-btn{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:10px;border:1px solid var(--border);background:var(--bg4);color:var(--text3);cursor:pointer;transition:all .1s;}
 .tag-btn:hover{border-color:var(--border2);color:var(--text2);}
+.me-ls-tag{font-size:9px;padding:1px 6px;border-radius:8px;margin-left:6px;font-weight:600;vertical-align:middle;}
+.me-ls-novel{background:#1e3a5f;color:#93c5fd;}
+.me-ls-unresolved{background:#4a1818;color:#fca5a5;}
+.me-summary{font-size:10px;color:var(--text3);margin:2px 0 4px 0;font-style:italic;}
+.me-child-summary{margin-left:18px;}
+.me-child-wrap{display:block;}
 .tb-pursue{background:rgba(122,200,136,.12);color:var(--success);border-color:rgba(122,200,136,.3);}
 .tb-revisit{background:rgba(122,158,200,.12);color:var(--accent3);border-color:rgba(122,158,200,.3);}
 .tb-needs{background:rgba(200,160,122,.12);color:var(--warn);border-color:rgba(200,160,122,.3);}
@@ -781,9 +787,15 @@ function unionBy(a, b, keyFn) {
 function buildMapBlock(entries, {includeAgents = false} = {}) {
   return entries.map((r) => {
     let line = `${r.id}: [${r.category}] ${r.title}`;
+    if (r.summary && (r.summary.methods || r.summary.phenomenon)) {
+      const parts = [];
+      if (r.summary.methods)    parts.push(`methods: ${r.summary.methods}`);
+      if (r.summary.phenomenon) parts.push(`phenomenon: ${r.summary.phenomenon}`);
+      line += `\n     SUMMARY: ${parts.join('; ')}`;
+    }
     if (includeAgents && r.agents.length) {
       const agentIds = [...new Set(r.agents.map(a => a.id))];
-      line += `, agents: ${agentIds.join(', ')}`;
+      line += `\n     agents: ${agentIds.join(', ')}`;
     }
     return line;
   }).join('\n');
@@ -1745,9 +1757,12 @@ List 4-6 directions. Each title must be under 20 words. Classify each direction 
 Category must be one of: DEEP+TRACTABLE, DEEP+BLOCKED, SHALLOW+TRACTABLE, SHALLOW+BLOCKED. Use this format:
 
   [DEEP+TRACTABLE] Title
+  SUMMARY: methods=<method(s) or model(s) used, in a few words — list more than one if the direction genuinely combines them>; phenomenon=<specific phenomenon being explained, in a few words>
   [DEEP+BLOCKED] Title
   [SHALLOW+TRACTABLE] Title
-  [SHALLOW+BLOCKED] Title`
+  [SHALLOW+BLOCKED] Title
+
+Include one SUMMARY line immediately after every direction's title line, in the same methods=...; phenomenon=... format.`
       : `EXISTING RESEARCH MAP — directions already identified across prior rounds:
 ${buildMapBlock(S.researchMap)}
 
@@ -1758,15 +1773,23 @@ List 4-6 directions. Each title must be under 20 words. Classify each direction 
 Category must be one of: DEEP+TRACTABLE, DEEP+BLOCKED, SHALLOW+TRACTABLE, SHALLOW+BLOCKED. Use this format:
 
   [DEEP+TRACTABLE] Title
+  SUMMARY: methods=<method(s) or model(s) used, in a few words — list more than one if the direction genuinely combines them>; phenomenon=<specific phenomenon being explained, in a few words>
   [DEEP+BLOCKED] Title
   [SHALLOW+TRACTABLE] Title
   [SHALLOW+BLOCKED] Title
 
-If a direction builds on or refines an existing direction from the map above (adds a method, narrows scope), add on the immediately following line:
-  EXTENDS: R1-0   (use the ID shown at the start of each line above — e.g. R1-0, R2-3 — not an integer, not a title)
+Include one SUMMARY line immediately after every direction's title line, in the same methods=...; phenomenon=... format.
 
-If a direction is substantively unchanged from an existing one (same research question, same primary method), reuse the exact title string from the map — no annotation needed.
-Do not suppress genuinely new directions to avoid a match.`;
+After SUMMARY, classify this direction's relationship to the existing map above with exactly one of the following on the next line:
+  EXTENDS: RN-n    — builds on, narrows, or adds a genuinely new method/scope to an existing direction. RN-n is the exact ID shown at the start of a line above — copy it exactly, e.g. R3-2 — not an integer, not a title.
+  SAME AS: RN-n    — substantively the same research question and method as an existing direction, even if the title or phrasing is different. RN-n is the existing entry's ID.
+  NEW DIRECTION    — this direction is new this round and does not extend or duplicate anything in the existing map above.
+
+The label line must contain only the label — no explanation, justification, or additional text. Labels are machine-parsed.
+
+If in doubt between SAME AS and EXTENDS: EXTENDS adds a genuinely new method, scope, or phenomenon; SAME AS addresses the same question by the same method, even if the title or phrasing differs.
+
+This is round R${S.currentRound}. The existing map above contains only directions from rounds R1 through R${S.currentRound - 1}. EXTENDS and SAME AS must reference an ID from that map — IDs beginning with R${S.currentRound} do not exist yet and cannot be referenced. If a direction has no parent in the existing map, write NEW DIRECTION; that is the correct label, not EXTENDS to another direction you are proposing in this round.`;
 
     const synthPrompt=`You have received outputs from a multi-agent theoretical research swarm. All outputs:\n${allOutputs}
 
@@ -2685,11 +2708,14 @@ function acceptRec(i){
 // PARSE SYNTHESIS
 // ══════════════════════════════════════════════════════════
 function parseSynthesis(text){
+  // existingMap is a snapshot of prior-round entries used for EXTENDS / SAME AS
+  // resolution. workingMap tracks provisional new entries for same-round dedup.
   const existingMap = [...S.researchMap];
   let mapCount = 0;
   let lastNewEntry = null;
-  const newEntries = [];
+  const newEntries  = [];   // surviving new entries (SAME AS retracts from here)
   const reusedEntries = [];
+  const workingMap  = [];   // provisional new entries for same-round title dedup
 
   for (const line of text.split('\n')) {
     const dirMatch = line.match(/\[([A-Z]+)\+([A-Z]+)\]\s*(.+)/);
@@ -2703,44 +2729,104 @@ function parseSynthesis(text){
         .replace(/\*+$/, '')
         .trim();
 
-      if (rawTitle && !S.researchMap.find(r => r.title === rawTitle)) {
-        const entry = {
-          id: `R${S.currentRound}-${mapCount}`,
-          title: rawTitle,
-          category: cat,
-          round: S.currentRound,
-          tag: null,
-          agents: [],
-          debateRefs: [],
-          parentIds: [],
-
-        };
-        S.researchMap.push(entry);
-        newEntries.push(entry);
-        lastNewEntry = entry;
-        mapCount++;
-      } else {
-        if (rawTitle) {
-          const existing = S.researchMap.find(r => r.title === rawTitle);
-          if (existing) reusedEntries.push(existing);
+      if (rawTitle) {
+        const existingPrior = existingMap.find(r => r.title === rawTitle);
+        const existingSameRound = workingMap.find(r => r.title === rawTitle);
+        if (!existingPrior && !existingSameRound) {
+          const entry = {
+            id: `R${S.currentRound}-${mapCount}`,
+            title: rawTitle,
+            category: cat,
+            round: S.currentRound,
+            tag: null,
+            agents: [],
+            debateRefs: [],
+            parentIds: [],
+            summary: null,
+            labelStatus: 'unlabeled',
+          };
+          newEntries.push(entry);
+          workingMap.push(entry);
+          lastNewEntry = entry;
+          mapCount++;
+        } else {
+          const existing = existingPrior || existingSameRound;
+          if (existingPrior && !reusedEntries.includes(existingPrior)) {
+            reusedEntries.push(existingPrior);
+          }
+          lastNewEntry = null;
         }
+      } else {
         lastNewEntry = null;
       }
     } else {
-      const extendsMatch = line.match(/^\s*EXTENDS:\s*(R\d+-\d+)/);
+      const summaryMatch      = line.match(/^\s*SUMMARY:\s*(.+)$/i);
+      const sameAsMatch       = line.match(/^\s*SAME AS:\s*(R\d+-\d+)/i);
+      // Accept NEW DIRECTION (current label) and bare NOVEL (backward-compat)
+      const novelMatch        = line.match(/^\s*(?:NEW DIRECTION|NOVEL)\b/i);
+      // Fallback: model wrote EXTENDS: NOVEL or EXTENDS: NEW DIRECTION
+      const extendsNovelMatch = line.match(/^\s*EXTENDS:\s*(?:NOVEL|NEW DIRECTION)\b/i);
+      const extendsMatch      = line.match(/^\s*EXTENDS:\s*(R\d+-\d+)/i);
+
+      // SAME AS retracts a provisionally-created entry and merges it into
+      // the referenced existing entry — handles acronym/reordering variants
+      // that exact-title matching misses.
+      if (sameAsMatch && lastNewEntry) {
+        const refId = sameAsMatch[1];
+        const ref   = existingMap.find(e => e.id === refId);
+        if (ref) {
+          const ni = newEntries.indexOf(lastNewEntry);
+          if (ni !== -1) newEntries.splice(ni, 1);
+          const wi = workingMap.indexOf(lastNewEntry);
+          if (wi !== -1) workingMap.splice(wi, 1);
+          if (!reusedEntries.includes(ref)) reusedEntries.push(ref);
+        } else {
+          // Unresolved: model referenced a same-round or non-existent ID
+          lastNewEntry.labelStatus = 'same_as_unresolved';
+        }
+        lastNewEntry = null;
+      }
+
+      if (summaryMatch && lastNewEntry) {
+        const raw = summaryMatch[1].trim();
+        const methodsM = raw.match(/methods?\s*=\s*([^;]+)/i);
+        const phenomM  = raw.match(/phenomenon\s*=\s*([^;]+)/i);
+        lastNewEntry.summary = {
+          methods:    methodsM ? methodsM[1].trim() : '',
+          phenomenon: phenomM  ? phenomM[1].trim()  : (methodsM ? '' : raw),
+        };
+      }
+
       if (extendsMatch && lastNewEntry) {
         const parentId = extendsMatch[1];
-        const parent = existingMap.find(e => e.id === parentId);
-        if (parent && !lastNewEntry.parentIds.includes(parent.id)) {
-          lastNewEntry.parentIds.push(parent.id);
+        const parent   = existingMap.find(e => e.id === parentId);
+        if (parent) {
+          if (!lastNewEntry.parentIds.includes(parent.id)) lastNewEntry.parentIds.push(parent.id);
+          lastNewEntry.labelStatus = 'extends';
+        } else {
+          // Unresolved: almost always a same-round sibling reference
+          lastNewEntry.labelStatus = 'extends_unresolved';
         }
       }
-      if (line.trim() && !extendsMatch) {
+
+      if (novelMatch && lastNewEntry) {
+        lastNewEntry.labelStatus = 'novel';
+      }
+
+      if (extendsNovelMatch && lastNewEntry) {
+        // Model wrote EXTENDS: NOVEL or EXTENDS: NEW DIRECTION — honour the intent
+        lastNewEntry.labelStatus = 'novel';
+      }
+
+      // End the current entry window only on a genuinely unrelated non-empty line
+      if (line.trim() && !summaryMatch && !sameAsMatch && !novelMatch && !extendsNovelMatch && !extendsMatch) {
         lastNewEntry = null;
       }
     }
   }
 
+  // Commit surviving new entries to the research map
+  newEntries.forEach(e => S.researchMap.push(e));
   rebuildMap();
   tc('map', S.researchMap.length);
 
@@ -2782,7 +2868,12 @@ function rebuildMap(){
     const cc=item.category.includes('DEEP')&&item.category.includes('TRACTABLE')?'var(--success)':item.category.includes('DEEP')?'var(--accent3)':item.category.includes('TRACTABLE')?'var(--accent)':'var(--text3)';
     const div=document.createElement('div');div.className='map-entry';
     const hdr=document.createElement('div');hdr.className='me-hdr';
-    hdr.innerHTML=`<span class="me-title">${item.title}</span><span class="me-meta" style="color:${cc}">${item.category}·R${item.round}</span>`;
+    const lsTag = item.labelStatus === 'novel'
+      ? `<span class="me-ls-tag me-ls-novel">new direction</span>`
+      : (item.labelStatus === 'extends_unresolved' || item.labelStatus === 'same_as_unresolved')
+        ? `<span class="me-ls-tag me-ls-unresolved">unresolved</span>`
+        : '';
+    hdr.innerHTML=`<span class="me-title">${item.title}</span><span class="me-meta" style="color:${cc}">${item.category}·R${item.round}</span>${lsTag}`;
     const handoverBtn=mkBtn('handover ↓','sm-btn',()=>runHandover(item.id));
     hdr.appendChild(handoverBtn);
     div.appendChild(hdr);
@@ -2792,6 +2883,15 @@ function rebuildMap(){
       tagRow.appendChild(tb);
     });
     div.appendChild(tagRow);
+    if (item.summary && (item.summary.methods || item.summary.phenomenon)) {
+      const sumEl = document.createElement('div');
+      sumEl.className = 'me-summary';
+      const parts = [];
+      if (item.summary.methods)    parts.push(`methods: ${item.summary.methods}`);
+      if (item.summary.phenomenon) parts.push(`phenomenon: ${item.summary.phenomenon}`);
+      sumEl.textContent = parts.join('  ·  ');
+      div.appendChild(sumEl);
+    }
     appendChildren(div, item, 1);
     p.appendChild(div);
   });
@@ -2804,10 +2904,21 @@ function appendChildren(container, parentItem, depth){
   if(depth>1)childList.style.marginLeft='12px';
   children.forEach(child=>{
     const childCc=child.category.includes('DEEP')&&child.category.includes('TRACTABLE')?'var(--success)':child.category.includes('DEEP')?'var(--accent3)':child.category.includes('TRACTABLE')?'var(--accent)':'var(--text3)';
+    const childDiv=document.createElement('div');childDiv.className='me-child-wrap';
     const childRow=document.createElement('div');childRow.className='me-child';
     childRow.innerHTML=`<span class="me-child-arrow">↳</span><span class="me-child-title">${child.title}</span><span class="me-meta" style="color:${childCc}"> ${child.category}·R${child.round}</span>`;
     childRow.appendChild(mkBtn('handover ↓','sm-btn',()=>runHandover(child.id)));
-    childList.appendChild(childRow);
+    childDiv.appendChild(childRow);
+    if (child.summary && (child.summary.methods || child.summary.phenomenon)) {
+      const cSumEl = document.createElement('div');
+      cSumEl.className = 'me-summary me-child-summary';
+      const cParts = [];
+      if (child.summary.methods)    cParts.push(`methods: ${child.summary.methods}`);
+      if (child.summary.phenomenon) cParts.push(`phenomenon: ${child.summary.phenomenon}`);
+      cSumEl.textContent = cParts.join('  ·  ');
+      childDiv.appendChild(cSumEl);
+    }
+    childList.appendChild(childDiv);
     appendChildren(childList, child, depth+1);
   });
   container.appendChild(childList);
@@ -2982,7 +3093,16 @@ function buildMd(){
   out+=`Export: ${new Date().toISOString()} | Cost: $${costS.total.toFixed(4)} | Cache savings: $${costS.saved.toFixed(4)}\n\n`;
   out+=`## Brief\n\n### Problem Context\n${brief.sysCtx}\n\n### Research Context\n${brief.resCtx}\n\n### Available Data\n${brief.dataCtx}\n\n`;
   out+=`## Research Map\n\n`;
-  S.researchMap.forEach(r=>out+=`- **[${r.category}]** ${r.title} *(R${r.round}, ${r.tag||'untagged'})*\n`);
+  S.researchMap.forEach(r=>{
+    const lsNote=r.labelStatus&&r.labelStatus!=='unlabeled'?' — '+r.labelStatus.replace(/_/g,' '):'';
+    out+=`- **[${r.category}]** ${r.title} *(R${r.round}, ${r.tag||'untagged'}${lsNote})*\n`;
+    if(r.summary&&(r.summary.methods||r.summary.phenomenon)){
+      const mp=[];
+      if(r.summary.methods)mp.push(`methods: ${r.summary.methods}`);
+      if(r.summary.phenomenon)mp.push(`phenomenon: ${r.summary.phenomenon}`);
+      out+=`  ${mp.join('; ')}\n`;
+    }
+  });
   out+=`\n## Contradictions\n\n`;
   S.contradictions.forEach(c=>out+=`- **${c.a1} vs ${c.a2}** (R${c.round})\n  ${c.claim1} — vs — ${c.claim2}\n  *Resolution: ${c.resolution}*\n\n`);
   S.rounds.forEach(r=>{
@@ -3080,9 +3200,11 @@ function importSession(event){
           if (r.agents && r.agents.length && typeof r.agents[0] === 'string') {
             r.agents = r.agents.map(id => ({id, round: r.round}));
           }
-          r.agents = r.agents || [];
-          r.id = r.id ?? `imported-${i}`;
-          r.parentIds = r.parentIds || [];
+          r.agents     = r.agents     || [];
+          r.id         = r.id         ?? `imported-${i}`;
+          r.parentIds  = r.parentIds  || [];
+          r.summary    = r.summary    || null;
+          r.labelStatus= r.labelStatus|| 'unlabeled';
         });
       }
       if(data.contradictions)S.contradictions=[...data.contradictions];
