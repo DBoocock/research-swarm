@@ -631,25 +631,38 @@ Each entry carries:
 | `agents` | `{id, round}[]` | Which agents contributed substantively and in which round. Accumulates across rounds via union merge on `id+round` key. |
 | `debateRefs` | `{key, round}[]` | Which debate exchanges contributed and in which round. Accumulates via union merge on `key+round`. |
 | `parentIds` | `string[]` | IDs of directions this one refines or extends, as annotated by the synthesis model. |
+| `summary` | `{methods, phenomenon}\|null` | Parsed from the `SUMMARY: methods=...; phenomenon=...` line written by the synthesis model after each direction title. Included in the existing-map block shown to subsequent rounds. |
+| `labelStatus` | `string` | One of `unlabeled` (round 1, or model wrote no label), `extends` (confirmed link to prior-round entry), `extends_unresolved` (model wrote `EXTENDS` but referenced a same-round or non-existent ID), `same_as_unresolved` (same failure for `SAME AS`), or `novel` (model wrote `NEW DIRECTION`). |
 
 The stable `id` field prevents a latent index-drift bug: before stable IDs, the handover and tag buttons on each map card held closures over the array index. A splice or reorder would silently point those closures at the wrong entry. Stable IDs allow all lookups to use `find(r => r.id === id)` regardless of array mutations.
 
-### 10.2 Direction identity over time — the four cases
+### 10.2 Direction identity over time
 
-From the second synthesis call onward, the prompt shows the synthesis model the existing research map as a numbered index list. The model is instructed to handle each direction it proposes according to its relationship to the existing entries. There are four possible outcomes:
+From the second synthesis call onward, the model sees the existing map (including each entry's `SUMMARY`) and must write one of three explicit labels after each direction's `SUMMARY` line:
 
-| Synthesis output | Map behaviour | What it means |
-|---|---|---|
-| New title, no `EXTENDS` | New entry, `parentIds=[]` | Genuinely new direction with no recorded lineage |
-| Existing title, no `EXTENDS` | No new entry; attribution updated for this round | Unchanged direction — synthesis model reused the exact title string |
-| Existing title + `EXTENDS: N` | No new entry; `EXTENDS` annotation ignored | Model attempted to annotate an existing entry — harmless, nothing changes |
-| New title + `EXTENDS: N` | New entry, `parentIds=[id of N]` | Refinement of an existing direction — new title, lineage recorded |
+- **`EXTENDS: RN-n`** — builds on or adds a new method/scope to a specific prior-round direction, referenced by its stable ID (e.g. `R3-2`).
+- **`SAME AS: RN-n`** — the same research question and method as an existing direction, even if the title or phrasing differs.
+- **`NEW DIRECTION`** — genuinely new this round; no meaningful ancestor in the existing map.
 
-The second row is the most important for attribution quality: when the synthesis model reuses an exact title, it is signalling that the direction is still active and being developed this round. The attribution call processes these reused entries alongside new ones, so contributions from later rounds accumulate in the existing entry's `agents` array. A direction first identified in round 1 attributed to agent A may accumulate `[{id:'A', round:1}, {id:'B', round:3}]` if agent B's round-3 outputs contributed substantially.
+The parser handles each label as follows:
 
-The third row (existing title with `EXTENDS`) arises when the model attempts to annotate an existing entry. Since no new entry is created, the `EXTENDS` annotation is silently discarded — the existing entry's `parentIds` were set when it was first created and do not need re-annotation.
+| Label written | Resolution | Map behaviour | `labelStatus` |
+|---|---|---|---|
+| `NEW DIRECTION` | — | New entry, `parentIds=[]` | `novel` |
+| `EXTENDS: RN-n` (ID in prior-round map) | ✓ | New entry, `parentIds=[RN-n]` | `extends` |
+| `EXTENDS: RN-n` (ID not in prior-round map) | ✗ | New entry, `parentIds=[]` | `extends_unresolved` |
+| `SAME AS: RN-n` (ID in prior-round map) | ✓ | Entry retracted; existing entry added to `reusedEntries` | — |
+| `SAME AS: RN-n` (ID not in prior-round map) | ✗ | New entry kept, `parentIds=[]` | `same_as_unresolved` |
+| No label written | — | New entry, `parentIds=[]` | `unlabeled` |
+| Exact title match (any label) | — | No new entry; existing entry added to `reusedEntries`; attribution updated | (unchanged) |
 
-**Known limitation — the table assumes reliable instruction-following.** The four cases partition cleanly only when the synthesis model follows the title-reuse and `EXTENDS: N` instructions precisely. In practice the synthesis model is doing genuine semantic analysis — it has just processed all generation outputs and debates — and may re-express a direction it considers "substantively unchanged" with a subtly different title based on new framing. In that case the exact-match check fails and the direction falls into row 1 (new entry, `parentIds=[]`) rather than row 2, creating a near-duplicate on the map when a reuse was intended. Similarly, the boundary between row 1 and row 4 depends on the model's judgement about what constitutes a refinement versus a genuinely new direction: a researcher might consider a row-4 entry (new title, `EXTENDS: N`) to be the same direction as its parent, just better expressed. The lineage mechanism is therefore a best-effort record of the synthesis model's stated intentions, not a guarantee of semantic deduplication. For sessions where near-duplicates appear on the map, the researcher should use the researcher-facing tag system to mark them and the handover feature to understand their relationship.
+**SAME AS retraction** is the key mechanism for catching near-duplicates that exact-title matching misses. When the model writes `SAME AS: RN-n`, the parser removes the provisional new entry from `newEntries` and `workingMap` before committing anything to `S.researchMap`, then adds the referenced existing entry to `reusedEntries`. The retraction is confirmed by a gap in the round's ID sequence — if round 3 proposes five directions but one is retracted, `R3-0` through `R3-3` appear in the map with no `R3-1` (or whichever slot was retracted).
+
+**Unresolved labels** (`extends_unresolved`, `same_as_unresolved`) arise almost exclusively from same-round sibling references: the synthesis model generates all directions for a round in one pass, sees its own in-progress output, and references an ID it has just written — which does not yet exist in the prior-round snapshot the parser validates against. The `parseSynthesis` snapshot is taken before any same-round entries are added, so these references always fail. Unresolved entries are kept on the map with `parentIds=[]` to preserve the direction's content; the `labelStatus` makes the failure visible in the UI.
+
+**Attribution quality** is unchanged from v4.9.0: exact-title reuse still triggers attribution accumulation. The synthesis model's `SAME AS` label now also triggers reuse-attribution, so content-equivalent directions that differ in phrasing are correctly accumulated into the existing entry rather than spawning a near-duplicate.
+
+**Known remaining limitation.** The three labels partition cleanly when the synthesis model identifies the correct prior-round parent. The boundary between `EXTENDS` and `NEW DIRECTION` depends on the model's judgement — a researcher may disagree with a label applied by the synthesis model, particularly for borderline cases where a new direction uses similar methods to an existing one but applies them to a different phenomenon. The labeling is the synthesis model's stated intention, not a guaranteed semantic classification. The `extends_unresolved` state also cannot be automatically promoted to `NEW DIRECTION`, because the model may have had a valid prior-round parent in mind and simply written the wrong ID — promoting would lose that intent. For sessions where the labeling seems incorrect, the researcher-facing tag system remains the primary tool for manual correction.
 
 ### 10.3 Synthesis-to-map pipeline
 
@@ -657,11 +670,11 @@ The synthesis model receives one of two prompt variants depending on whether the
 
 **First synthesis (empty map):** The `RESEARCH DIRECTIONS` block shows only the four valid category labels with their axis definitions (`DEEP` = theoretically fundamental or novel; `SHALLOW` = incremental or applied; `TRACTABLE` = feasible with available data and methods now; `BLOCKED` = requires unavailable data or an unresolved theoretical prerequisite). No `EXTENDS` or title-reuse instructions appear — there is nothing to reference.
 
-**Subsequent syntheses (populated map):** The prompt prepends the existing map as a numbered index list, then adds two rules:
-- *Title reuse*: if a direction is substantively unchanged, reuse the exact title string
-- *`EXTENDS: N`*: if a direction refines an existing one, annotate the immediately following line with the integer index from the numbered list — not a name, not a round number
+**Subsequent syntheses (populated map):** The prompt prepends the existing map — each entry as `RN-n: [CATEGORY] Title` followed by an indented `SUMMARY: methods=...; phenomenon=...` line — then instructs the model to write a `SUMMARY` line immediately after each proposed direction's title, followed by exactly one of three labels: `EXTENDS: RN-n`, `SAME AS: RN-n`, or `NEW DIRECTION`. The prompt also states the current round number and the valid ID range (`R1 through R{N-1}`) to make the same-round reference constraint concrete.
 
-The `parseSynthesis` function processes the synthesis output line by line. It snapshots the existing map before any additions begin — this snapshot provides the index reference for validating `EXTENDS: N` annotations. A direction is added to the map only if its cleaned title is not already present; otherwise the existing entry is flagged as reused and passed to the attribution call. `EXTENDS: N` is validated against the snapshot length; out-of-range indices are silently discarded.
+The `parseSynthesis` function processes the synthesis output line by line. It snapshots the existing map before any additions begin (`existingMap`) — this snapshot is used for all EXTENDS and SAME AS resolution. A `workingMap` tracks provisional new entries within the current pass for same-round title deduplication. New entries are batch-committed to `S.researchMap` only after the full pass completes, allowing mid-parse SAME AS retractions to splice entries before they are ever added to the map.
+
+The `SUMMARY` line is parsed by regex (`methods?\s*=\s*([^;]+)` and `phenomenon\s*=\s*([^;]+)`) and written to `entry.summary`. Category labels continue to be parsed permissively via `includes()` checks, handling tokenisation-level stutters such as `[DEDEEP+TRACTABLE]`.
 
 Category labels are parsed permissively: the regex matches any uppercase text in `[X+Y]` bracket format and normalises using keyword-contains checks (`includes('DEEP')`, `includes('TRACTABLE')` etc.). This handles tokenisation-level stutters such as `[DEDEEP+TRACTABLE]` that an exact-match regex would silently drop.
 
@@ -682,6 +695,8 @@ const text = flatCompressedUpTo(id, maxRound) || flatGen(id);
 ### 10.5 Lineage display
 
 Only root entries — those with no `parentIds` that resolve to a current map entry — are rendered as full standalone cards in the map panel. Child entries (directions with a resolvable parent) appear exclusively as `↳ Title CATEGORY·Rn` rows beneath their parent's card, with a handover button; they do not generate separate standalone cards. This prevents each direction from appearing twice and keeps the map readable as the lineage graph deepens across rounds.
+
+Root cards additionally show a small `labelStatus` badge to the right of the category metadata: a blue `new direction` badge when `labelStatus === 'novel'`, and a red `unresolved` badge when `labelStatus` is `extends_unresolved` or `same_as_unresolved`. No badge appears for `unlabeled` (round-1 entries, which have nothing to label against) or `extends` (the normal successful case). All entries — root and child — display their `summary` (methods · phenomenon) as a small italic line beneath the title.
 
 The child rendering is recursive: each child row is followed by its own children (grandchildren of the parent card), each indented a further 12 px to the right. A depth guard of 8 prevents runaway recursion in the unlikely event of a circular reference. The tag buttons are available only on standalone root cards; tagging of child directions is a noted future enhancement.
 

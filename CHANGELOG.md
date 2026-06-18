@@ -1,5 +1,61 @@
 # Changelog
 
+## v4.9.1
+
+### Direction labeling: SAME AS, EXTENDS, NEW DIRECTION, and SUMMARY fields (issue #21)
+
+#### Problem
+
+The v4.9.0 direction identity system used two mechanisms for relating a direction to prior rounds: exact title reuse (signalling an unchanged direction) and an `EXTENDS: N` annotation referencing a zero-based index (signalling a refinement). Both mechanisms had significant failure modes. Exact-title reuse broke silently whenever the synthesis model paraphrased a direction it considered unchanged — the title differed, the deduplication check failed, and a near-duplicate entered the map. `EXTENDS: N` used integer indices that were fragile under any reordering and gave the model no semantic content to reason about when deciding what to extend. Failed `EXTENDS` resolution silently produced entries with `labelStatus = 'extends'` but no `parentIds` — a phantom link that corrupted the map without any visible signal.
+
+#### New three-way labeling system
+
+The synthesis prompt now instructs the model to write one of three explicit labels after each direction's SUMMARY line:
+
+- **`EXTENDS: RN-n`** — builds on or adds a genuinely new method/scope to an existing direction. References a stable `R{round}-{position}` ID (e.g. `R3-2`), not an integer index. The parser validates the ID against a prior-round snapshot; a confirmed link sets `labelStatus = 'extends'` and writes `parentIds`.
+- **`SAME AS: RN-n`** — the same research question and method as an existing direction, even if the title or phrasing differs. The parser retracts the provisional new entry mid-parse and merges it into the referenced existing entry, preventing near-duplicates that exact-title matching would miss.
+- **`NEW DIRECTION`** — genuinely new this round with no ancestor in the existing map.
+
+Labels are required to be machine-exact — no explanation, justification, or extra text on the label line.
+
+#### SUMMARY field
+
+Each direction now requires a `SUMMARY: methods=...; phenomenon=...` line immediately after its title. The parser writes this as `{methods, phenomenon}` on the entry's `summary` field. The existing map shown to the synthesis model in subsequent rounds now includes each entry's SUMMARY below its ID and title, giving the model concrete method/phenomenon content to reason about when deciding EXTENDS vs SAME AS vs NEW DIRECTION — rather than title text alone.
+
+#### Round injection
+
+The synthesis prompt now states the current round number explicitly: `This is round R{N}. The existing map above contains only directions from rounds R1 through R{N-1}. EXTENDS and SAME AS must reference an ID from that map — IDs beginning with R{N} do not exist yet.` This makes the same-round reference constraint concrete and checkable rather than a general policy statement.
+
+#### `extends_unresolved` and `same_as_unresolved`
+
+When EXTENDS or SAME AS resolution fails — almost always because the model referenced a same-round sibling ID that doesn't exist in the prior-round snapshot — the entry is tagged `extends_unresolved` or `same_as_unresolved` respectively. This replaces the previous silent mislabeling where failed resolution set `labelStatus = 'extends'` with no `parentIds`. The tree view renders these as a red `unresolved` tag; the previous behavior was invisible.
+
+#### Parser changes
+
+`parseSynthesis` now batch-commits new entries after the full line-by-line pass rather than adding each entry to `S.researchMap` immediately. This is required to support mid-parse SAME AS retractions: an entry cannot be spliced from a list it has already been added to. A `workingMap` tracks provisional entries for same-round title deduplication. The function remains backward-compatible with the old `NOVEL` label (now renamed `NEW DIRECTION`) and with sessions imported before this change.
+
+#### State changes
+
+`S.researchMap` entries carry two new fields:
+- `summary: {methods: string, phenomenon: string} | null` — parsed from the SUMMARY line
+- `labelStatus: string` — one of `unlabeled`, `extends`, `extends_unresolved`, `same_as_unresolved`, `novel`
+
+`importSession` backfills both fields on legacy entries: `summary = null`, `labelStatus = 'unlabeled'`.
+
+#### UI changes
+
+Root entries in the research map panel now display a `new direction` tag (blue) or `unresolved` tag (red) when `labelStatus` is `novel` or `*_unresolved` respectively. All entries — root and child — display their SUMMARY (methods · phenomenon) as a small italic line beneath the title. The markdown export includes `labelStatus` notes and SUMMARY lines per direction.
+
+#### Empirical results
+
+Tested across five real-tool and replay runs after implementation. `extends_unresolved` count: 0–2 per run, down from silent corruption across all failed resolutions. SAME AS retraction: 100% correct across all observed firing events. NEW DIRECTION: correctly applied in all observed cases. No justification text appeared on any EXTENDS line after the label constraint was added.
+
+#### Remaining known limitation
+
+Same-round self-references remain possible: the synthesis model can reference an ID from its own current-round output (e.g. `EXTENDS: R5-0` for the direction that will itself become R5-0). These are correctly tagged `extends_unresolved` rather than silently corrupting the map, but the underlying cause — the model treating its own in-progress output as a reference source — is not eliminated by prompt alone. Tracked in issue #21.
+
+---
+
 ## v4.9.0
 
 ### Direction identity, lineage tracking, and synthesis map awareness (issue #21)

@@ -379,7 +379,13 @@ The roster agent is best run before starting a new session, after significantly 
 
 Every synthesis extracts research directions tagged with their depth/tractability category. These accumulate across all rounds in the **Research Map** tab. Each direction carries a stable identifier (`R{round}-{position}`) assigned at parse time.
 
-From the second synthesis onward, the synthesis model sees the existing map as a numbered list and is instructed to handle each direction it proposes in one of four ways: reuse the exact title string if the direction is unchanged; annotate it with `EXTENDS: N` (on the immediately following line) if it refines an existing direction; propose a new title with no annotation if it is genuinely new. Directions annotated with `EXTENDS: N` are shown indented beneath their parent direction in the map panel, making the lineage of the research agenda visible across rounds.
+From the second synthesis onward, the synthesis model sees the existing map (with each entry's methods and phenomenon) and must write one of three explicit labels after each direction's SUMMARY line:
+
+- **`EXTENDS: RN-n`** — builds on or adds a new method/scope to an existing direction; the referenced ID must come from the prior-round map
+- **`SAME AS: RN-n`** — same research question and method as an existing direction, even if the title differs; the parser retracts the new entry and merges it into the referenced existing one, preventing near-duplicates that title matching would miss
+- **`NEW DIRECTION`** — genuinely new this round with no ancestor in the existing map
+
+Directions with a confirmed `EXTENDS` link are shown indented beneath their parent in the map panel, making the lineage of the research agenda visible across rounds. Root directions labeled `NEW DIRECTION` carry a blue tag; any direction whose label referenced a same-round or non-existent ID carries a red `unresolved` tag.
 
 Each direction also carries structured attribution data recorded at synthesis time: which agents contributed substantively (`{id, round}[]` — recording both the agent and the round they were attributed), and which debate exchanges brought it into focus. Attribution accumulates across rounds — a direction first identified in round 1 may gain additional attributed agents in later rounds as it continues to be developed. This attribution is used to pre-load relevant context when generating a handover document.
 
