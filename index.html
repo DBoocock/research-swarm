@@ -340,7 +340,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
   </div>
 
   <div class="cost-panel">
-    <div class="cost-panel-hdr"><span id="cost-panel-title">Session cost</span><button onclick="resetCost()">reset</button></div>
+    <div class="cost-panel-hdr"><span id="cost-panel-title">Session cost</span></div>
     <div class="cost-total"><span class="cost-amount" id="cost-total">$0.0000</span><span class="cost-sublabel" id="cost-sublabel">this session</span></div>
     <div class="cost-grid">
       <div class="cc"><span class="cc-label">Input tok</span><span class="cc-val" id="ci">0</span></div>
@@ -381,8 +381,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
   <div class="sidebar-section">
     <div class="ss-hdr"><span>Depth</span></div>
     <div class="depth-row">
-      <button class="depth-btn" onclick="setDepth('brief',this)">brief</button>
-      <button class="depth-btn active" onclick="setDepth('detailed',this)">detailed</button>
+      <button class="depth-btn active" onclick="setDepth('brief',this)">brief</button>
+      <button class="depth-btn" onclick="setDepth('detailed',this)">detailed</button>
       <button class="depth-btn" onclick="setDepth('exhaustive',this)">exhaustive</button>
     </div>
   </div>
@@ -679,12 +679,12 @@ let agents=[...DEFAULT_AGENTS.map(a=>({...a}))];
 let S={
   provider:'gemini',        // 'anthropic' | 'gemini' — active API provider
   apiKeys:{anthropic:'',gemini:''}, // populated from sidebar inputs; never exported
-  depth:'detailed',
+  depth:'brief',
   synthesisModel:'sonnet', // 'sonnet' | 'opus' — controls synthesis, meta-agent, and roster calls (Anthropic only)
   selectedAgents:new Set(DEFAULT_AGENTS.map(a=>a.id)),
   agentStatuses:Object.fromEntries(DEFAULT_AGENTS.map(a=>[a.id,'active'])), // active|genonly|retired|promoted
   currentRound:0, running:false,
-  genBlocks:{}, compressedGen:{}, currentDebate:{}, currentSynthesis:null,
+  genBlocks:{}, compressedGen:{}, currentDebate:{}, currentDebateTypes:{}, currentSynthesis:null,
   pairingProposals:[], retirementProposals:[],
   rounds:[],
   researchMap:[], contradictions:[],
@@ -850,7 +850,6 @@ function briefOnlyBlock(){
 // ══════════════════════════════════════════════════════════
 // COST
 // ══════════════════════════════════════════════════════════
-function resetCost(){costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[],callCount:0};renderCost();}
 function addUsage(name,u,model){
   const i=u.input_tokens||0,o=u.output_tokens||0,cw=u.cache_creation_input_tokens||0,cr=u.cache_read_input_tokens||0;
   const P=priceFor(model);
@@ -1336,7 +1335,7 @@ async function runGen(){
   S.running=true;lockTabs();
   if(isFirstRound) S.currentRound++;
   // Don't clear S.genBlocks — preserve existing outputs for agents not in this run
-  if(isFirstRound){ S.genBlocks={}; S.compressedGen={}; S.currentDebate={}; S.agentReflections={}; }
+  if(isFirstRound){ S.genBlocks={}; S.compressedGen={}; S.currentDebate={}; S.currentDebateTypes={}; S.agentReflections={}; }
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-gen');
   // On subsequent rounds, add new agent cards without clearing existing ones
@@ -1439,7 +1438,7 @@ async function runDebate(){
   if(S.running)return;
   const activePairs=S.pairingProposals.filter(p=>p.enabled);
   if(!activePairs.length){setStatus('No pairs enabled.');return;}
-  S.running=true;lockTabs();S.currentDebate={};
+  S.running=true;lockTabs();S.currentDebate={};S.currentDebateTypes={};
   S.currentRound++; // increment here — debate rounds are the primary round boundary
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-deb');panel.innerHTML='';
@@ -1462,6 +1461,8 @@ async function runDebate(){
   const pairBodyEls={};
   activePairs.forEach(pair=>{
     const key=pair.id1+'_'+pair.id2;
+    S.currentDebateTypes[key]=pair.type; // captured here, at launch time, so saveRound() can
+                                          // store it on THIS round's record — no cross-round lookup needed
     const a1=agents.find(a=>a.id===pair.id1),a2=agents.find(a=>a.id===pair.id2);
     const card=makeDebateCard(a1,a2,pair.type);panel.appendChild(card);
     pairBodyEls[key]=card.querySelector('.rcard-body');
@@ -1718,9 +1719,8 @@ async function runSynthesis(includeDebate){
   // meaning a compression error left the panel empty with no visible feedback and tabs
   // unlocked as soon as runDebate's finally block ran.
   S.currentSynthesis='';
-  const synthModelLabel=S.synthesisModel==='opus'?'opus':'sonnet';
   const sc=document.createElement('div');sc.className='synth-card';
-  sc.innerHTML=`<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-run">running</span><span style="font-size:9px;color:var(--text3);margin-left:6px;">${synthModelLabel}</span></div><div class="rcard-body" id="syn-body"><span class="cursor"></span></div>`;
+  sc.innerHTML=`<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-run">running</span></div><div class="rcard-body" id="syn-body"><span class="cursor"></span></div>`;
   panel.appendChild(sc);
 
   let allOutputs='';
@@ -3011,6 +3011,77 @@ function renderOverlapMatrix(){
 }
 
 // ══════════════════════════════════════════════════════════
+// IMPORT RECONSTRUCTION — Generation / Debate / Synthesis panels
+// ══════════════════════════════════════════════════════════
+// These mirror what runGen()/runDebate()/runSynthesis() actually render live —
+// not a generic "replay everything" — so an imported session looks identical
+// to one that ran in this browser the whole way through. In particular:
+// reflection-extended directions are never shown in panel-gen live, so they
+// are not shown here either (see issue: live generation panel should display
+// reflection-extended directions, filed separately).
+function rebuildGenerationPanel(){
+  const panel=document.getElementById('panel-gen');panel.innerHTML='';
+  if(!Object.keys(S.genBlocks).length)return;
+  // Group agents by the round in which they FIRST generated. S.genBlocks is the
+  // single cumulative source of truth (already restored by this point in
+  // importSession), so this needs no per-round snapshot — each block already
+  // carries its own origin round.
+  const byFirstRound={};
+  Object.entries(S.genBlocks).forEach(([agentId,blocks])=>{
+    const r=blocks.initial.round;
+    (byFirstRound[r]=byFirstRound[r]||[]).push(agentId);
+  });
+  const sortedRounds=Object.keys(byFirstRound).map(Number).sort((a,b)=>a-b);
+  sortedRounds.forEach((roundNum,idx)=>{
+    const agentIds=byFirstRound[roundNum];
+    const title=idx===0
+      ? `Round ${roundNum} — Generation`
+      : `Round ${roundNum} — New agent generation (${agentIds.length} agent${agentIds.length>1?'s':''})`;
+    panel.appendChild(makeRoundHdr(title,'done'));
+    agentIds.forEach(agentId=>{
+      const agent=agents.find(a=>a.id===agentId);
+      if(!agent)return;
+      const card=makeResultCard(agent.name,agent.color,'done');
+      card.querySelector('.rcard-body').textContent=S.genBlocks[agentId].initial.text;
+      panel.appendChild(card);
+    });
+  });
+}
+
+// Both panel-deb and panel-syn clear and rewrite on every round in the live UI
+// (runDebate()/runSynthesis() both do panel.innerHTML='' before appending) — so
+// faithfully reproducing the session's state at export time means showing only
+// the MOST RECENT round, not the full history. (Generation is different: that
+// panel genuinely accumulates cards across rounds live, which is why
+// rebuildGenerationPanel() above groups by first-appearance round instead.)
+function rebuildDebatePanel(){
+  const panel=document.getElementById('panel-deb');panel.innerHTML='';
+  if(!S.rounds.length)return;
+  const lastRound=S.rounds[S.rounds.length-1];
+  if(!Object.keys(lastRound.debateOutputs).length)return; // e.g. session never advanced past round 1
+  panel.appendChild(makeRoundHdr(`Round ${lastRound.round} — Debate`,'done'));
+  Object.entries(lastRound.debateOutputs).forEach(([key,text])=>{
+    const[id1,id2]=key.split('_');
+    const a1=agents.find(a=>a.id===id1),a2=agents.find(a=>a.id===id2);
+    const card=makeDebateCard(a1,a2,lastRound.debateTypes?.[key]||'DEBATE');
+    card.querySelector('.rcard-body').textContent=text;
+    panel.appendChild(card);
+  });
+}
+
+function rebuildSynthesisPanel(){
+  const panel=document.getElementById('panel-syn');panel.innerHTML='';
+  if(!S.rounds.length)return;
+  const lastRound=S.rounds[S.rounds.length-1];
+  if(!lastRound.synthesis)return;
+  panel.appendChild(makeRoundHdr('Synthesis','done'));
+  const sc=document.createElement('div');sc.className='synth-card';
+  sc.innerHTML=`<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-done">done</span></div><div class="rcard-body"></div>`;
+  sc.querySelector('.rcard-body').textContent=lastRound.synthesis;
+  panel.appendChild(sc);
+}
+
+// ══════════════════════════════════════════════════════════
 // SESSION LOG + EXPORT
 // ══════════════════════════════════════════════════════════
 function saveRound(includeDebate){
@@ -3021,10 +3092,14 @@ function saveRound(includeDebate){
   const seqNum = S.rounds.length + 1;
   S.rounds.push({
     round:seqNum,ts:new Date().toISOString(),depth:S.depth,
-    genBlocks:JSON.parse(JSON.stringify(S.genBlocks)),debateOutputs:{...S.currentDebate},
+    debateOutputs:{...S.currentDebate},debateTypes:{...S.currentDebateTypes},
     synthesis:S.currentSynthesis,pairingProposals:[...S.pairingProposals],
-    retirementProposals:[...S.retirementProposals],
-    agentReflections:JSON.parse(JSON.stringify(S.agentReflections))
+    retirementProposals:[...S.retirementProposals]
+    // genBlocks and agentReflections intentionally NOT snapshotted here — both are
+    // already captured once, without duplication, at the top level of the export
+    // (S.genBlocks / S.agentReflections in buildExportData()), and every entry
+    // within them carries its own origin round, so per-round derivation never
+    // needs a full re-snapshot of the whole structure each round.
   });
   renderLog();tc('log',S.rounds.length);
 }
@@ -3035,7 +3110,9 @@ function renderLog(){
   p.appendChild(makeSectionLabel(`${S.rounds.length} round${S.rounds.length>1?'s':''} — auto-exported after each synthesis`));
   [...S.rounds].reverse().forEach(r=>{
     const div=document.createElement('div');div.className='log-entry';
-    const genNames=Object.keys(r.genBlocks).map(id=>agents.find(a=>a.id===id)?.name||id);
+    const genNames=Object.entries(S.genBlocks)
+      .filter(([id,blocks])=>blocks.initial.round===r.round||blocks.extensions.some(e=>e.round===r.round))
+      .map(([id])=>agents.find(a=>a.id===id)?.name||id);
     const debCount=Object.keys(r.debateOutputs).length;
     div.innerHTML=`<div class="log-entry-hdr"><span class="badge b-done">done</span><span style="font-size:12px;color:var(--text2);flex:1;margin-left:6px;">Round ${r.round} · ${r.depth} · ${new Date(r.ts).toLocaleTimeString()}</span></div>
       <div class="log-entry-body">${genNames.length} agents · ${debCount} debate outputs\n\n${r.synthesis?r.synthesis.slice(0,400)+'…':'(no synthesis)'}</div>`;
@@ -3079,7 +3156,8 @@ function setLastExport(fname,type){
 
 function buildExportData(){
   return{exportTime:new Date().toISOString(),provider:S.provider||'gemini',brief,
-    reflectionsEnabled:S.reflectionsEnabled,
+    reflectionsEnabled:S.reflectionsEnabled,depth:S.depth,synthesisModel:S.synthesisModel,
+    selectedAgents:[...S.selectedAgents],
     agentMandates:Object.fromEntries(agents.map(a=>[a.id,{name:a.name,color:a.color,mandate:a.mandate,status:S.agentStatuses[a.id]||'active'}])),
     sessionCost:{total:costS.total,saved:costS.saved,inputTok:costS.inp,outputTok:costS.out,cacheReads:costS.cr,cacheWrites:costS.cw},
     rounds:S.rounds,researchMap:S.researchMap,contradictions:S.contradictions,
@@ -3107,10 +3185,14 @@ function buildMd(){
   S.contradictions.forEach(c=>out+=`- **${c.a1} vs ${c.a2}** (R${c.round})\n  ${c.claim1} — vs — ${c.claim2}\n  *Resolution: ${c.resolution}*\n\n`);
   S.rounds.forEach(r=>{
     out+=`\n${'='.repeat(60)}\n## Round ${r.round} · ${r.depth}\n\n### Generation\n\n`;
-    Object.entries(r.genBlocks).forEach(([id,blocks])=>{
+    Object.entries(S.genBlocks).forEach(([id,blocks])=>{
+      let text='';
+      if(blocks.initial.round===r.round)text+=`--- INITIAL GENERATION (round ${blocks.initial.round}) ---\n${blocks.initial.text}`;
+      blocks.extensions.filter(e=>e.round===r.round).forEach(ext=>{
+        text+=(text?'\n\n':'')+`--- REFLECTION-EXTENDED DIRECTIONS (round ${ext.round}) ---\n${ext.text}`;
+      });
+      if(!text)return; // this agent generated nothing new in this round
       const n=agents.find(a=>a.id===id)?.name||id;
-      let text=`--- INITIAL GENERATION (round ${blocks.initial.round}) ---\n${blocks.initial.text}`;
-      blocks.extensions.forEach(ext=>{text+=`\n\n--- REFLECTION-EXTENDED DIRECTIONS (round ${ext.round}) ---\n${ext.text}`;});
       out+=`#### ${n}\n${text}\n\n`;
     });
     if(Object.keys(r.debateOutputs).length){
@@ -3118,7 +3200,8 @@ function buildMd(){
       Object.entries(r.debateOutputs).forEach(([key,text])=>{
         const[id1,id2]=key.split('_');
         const n1=agents.find(a=>a.id===id1)?.name||id1,n2=agents.find(a=>a.id===id2)?.name||id2;
-        out+=`#### ${n1} → ${n2}\n${text}\n\n`;
+        const type=r.debateTypes?.[key];
+        out+=`#### ${n1} → ${n2}${type?' ['+type+']':''}\n${text}\n\n`;
       });
     }
     out+=`### Synthesis\n${r.synthesis}\n`;
@@ -3178,6 +3261,18 @@ function importSession(event){
         document.getElementById('swarm-subtitle').textContent=brief.subtitle;
         document.title=brief.title;
       }
+      // Restore provider — determines which API key field is shown and which
+      // provider any further calls go to; also read directly by renderCost()
+      // and runHandover() for labelling/formatting decisions.
+      if(data.provider)setProvider(data.provider);
+      // Restore depth — affects prompt length on any further generation/debate
+      // calls, and keeps the depth-selector buttons showing the right one.
+      if(data.depth){
+        const depthBtn=document.querySelector(`.depth-btn[onclick*="setDepth('${data.depth}'"]`);
+        if(depthBtn)setDepth(data.depth,depthBtn);
+      }
+      // Restore synthesis model (Anthropic-only; harmless no-op on Gemini sessions)
+      if(data.synthesisModel)setSynthModel(data.synthesisModel);
       // Restore agents from saved mandates
       if(data.agentMandates){
         Object.entries(data.agentMandates).forEach(([id,saved])=>{
@@ -3188,10 +3283,14 @@ function importSession(event){
           } else {
             agents.push({id,name:saved.name,color:saved.color,mandate:saved.mandate});
             S.agentStatuses[id]=saved.status||'active';
-            S.selectedAgents.add(id);
           }
         });
       }
+      // Restore on/off selection explicitly — agentMandates always contains the
+      // full agent roster regardless of participation, so it can't be used to
+      // infer which agents were actually toggled on. selectedAgents is tracked
+      // and exported as its own field for exactly this reason.
+      S.selectedAgents=new Set(data.selectedAgents||[]);
       // Restore accumulated research intelligence
       if(data.rounds)S.rounds=[...data.rounds];
       if(data.researchMap){
@@ -3220,6 +3319,33 @@ function importSession(event){
       }
       // Restore round counter
       if(data.rounds&&data.rounds.length)S.currentRound=Math.max(...data.rounds.map(r=>r.round));
+      // Restore pending Next Round proposals — these live on the MOST RECENT
+      // round's record (runMeta() proposes pairs for the round after the one
+      // that just finished; saveRound() captures them immediately after —
+      // see rebuildDebatePanel()'s debateTypes for the same timing in reverse).
+      const lastRound=data.rounds&&data.rounds.length?data.rounds[data.rounds.length-1]:null;
+      S.pairingProposals=lastRound?[...(lastRound.pairingProposals||[])]:[];
+      S.retirementProposals=lastRound?[...(lastRound.retirementProposals||[])]:[];
+      // Restore the live "current debate" buffer from the most recent round.
+      // Note: every existing continuation path (runDebate → runReflectionRound →
+      // runSynthesis) resets this at the start of a new debate round before
+      // anything reads it, so nothing currently depends on this — restored
+      // anyway for state fidelity and as a safety net for future code.
+      S.currentDebate=lastRound?{...lastRound.debateOutputs}:{};
+      S.currentDebateTypes=lastRound?{...lastRound.debateTypes}:{};
+      // Restore this session's cost so the cost panel reflects actual historical
+      // spend rather than resetting to $0 — informational, but matters for
+      // budget awareness before deciding whether to run more rounds. Uses
+      // historical totals as recorded, not current pricing re-applied.
+      if(data.sessionCost){
+        costS={
+          inp:data.sessionCost.inputTok||0,out:data.sessionCost.outputTok||0,
+          cr:data.sessionCost.cacheReads||0,cw:data.sessionCost.cacheWrites||0,
+          total:data.sessionCost.total||0,saved:data.sessionCost.saved||0,
+          calls:[] // per-call log isn't exported; starts empty, fills in as new calls happen
+        };
+        renderCost();
+      }
       // Rebuild all panels
       renderAgentList();
       renderLog();
@@ -3227,9 +3353,22 @@ function importSession(event){
       rebuildContradictions();
       rebuildMatrix();
       renderOverlapMatrix();
+      rebuildGenerationPanel();
+      rebuildDebatePanel();
+      rebuildSynthesisPanel();
+      renderPairingsPanel();
       tc('log',S.rounds.length);
       tc('map',S.researchMap.length);
       tc('contra',S.contradictions.length||'!');
+      // gen/deb/syn tab counts mirror live behaviour exactly: they are NOT
+      // cumulative totals (the live UI overwrites them every round — tc('syn',1)
+      // is literally always 1, never a running count), so the count restored
+      // here is whatever the LAST relevant round would have last set it to.
+      const genRounds=Object.values(S.genBlocks).map(b=>b.initial.round);
+      const lastGenRound=genRounds.length?Math.max(...genRounds):0;
+      tc('gen',genRounds.filter(r=>r===lastGenRound).length);
+      tc('deb',lastRound?Object.keys(lastRound.debateOutputs).length:0);
+      tc('syn',S.rounds.length?1:0);
       setStatus(`Session imported: ${S.rounds.length} round${S.rounds.length!==1?'s':''} restored. API key required to continue.`);
       switchTab('log');
     }catch(err){
