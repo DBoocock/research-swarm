@@ -194,7 +194,7 @@ The interface is divided into a **sidebar** (always visible) and a **main panel*
 | **Session cost** | Live cost tracker with cache hit rate |
 | **Agents** | Agent list with status, edit, and delete controls |
 | **Synthesis model** | Sonnet / Opus toggle (Anthropic only) |
-| **Depth** | Brief / Detailed / Exhaustive output length |
+| **Depth** | Brief (default) / Detailed / Exhaustive output length |
 | **Reflection round** | Enable / disable the two-call reflection pipeline after each debate round |
 | **Run button** | Launches the generation round |
 | **Status bar** | Current operation status |
@@ -306,7 +306,7 @@ To create an agent with overlapping expertise (for productive debate tension), c
 
 | Depth | Words/agent | Best for |
 |---|---|---|
-| Brief | ~180 | First pass, 10+ agents, rapid domain mapping |
+| Brief (default) | ~180 | First pass, 10+ agents, rapid domain mapping |
 | Detailed | ~320 | Standard sessions, 5–10 agents |
 | Exhaustive | ~500 | Drilling into specific directions with 3–6 agents |
 
@@ -565,8 +565,9 @@ Both a JSON file and a Markdown file are automatically downloaded after every sy
 
 The JSON file contains:
 - The full brief (all five fields)
-- All agent mandates
-- Every round's generation outputs, debate outputs, and synthesis
+- All agent mandates, statuses, and which agents are currently selected
+- Provider, depth, and synthesis model settings
+- Every round's generation outputs, debate outputs (with pairing types), and synthesis
 - The research map with tags
 - The contradiction log
 - The depth/tractability matrix
@@ -579,15 +580,18 @@ Files are named `swarm-[timestamp].json` and `swarm-[timestamp].md`.
 
 ### Resuming a session
 
-Click **import session** in the tab bar and select a previously exported JSON file. The tool will restore:
+Click **import session** in the tab bar and select a previously exported JSON file. The tool fully reconstructs the session as it stood at export time — indistinguishable from a session that had run in the browser the whole way through, not just a data restore behind an empty UI. This restores:
 - The research brief and agent mandates
-- The accumulated research map with tags
-- The contradiction log
-- The session log with all round summaries
-- The overlap matrix scores
-- The agent roster and statuses
+- The accumulated research map with tags, the contradiction log, the depth/tractability matrix, and the overlap matrix scores
+- The agent roster, statuses, and exactly which agents were toggled on (tracked explicitly, not inferred from who has output)
+- Provider, depth, and synthesis model — matching what the session actually used, not the tool's defaults
+- Session cost — historical totals as recorded, not current pricing re-applied
+- **Generation, Debate, and Synthesis tabs** — fully repopulated with the actual round content
+- **Next Round tab** — any pending pairing or status-change proposals the session hadn't yet acted on
 
-The streaming outputs from previous rounds are not restored visually, but the session log repopulates with all round summaries and synthesis outputs, and the accumulated research intelligence (map, contradictions, matrix) is fully intact. You can continue running new rounds from where you left off.
+Generation shows every agent's output, grouped by the round each first generated in (cumulative, since that's how it behaves live). Debate and Synthesis show the most recent round only, matching exactly what would be on screen if you'd run the session live and never refreshed — both panels clear and redraw each round rather than accumulating, so importing intentionally mirrors that rather than showing more history than a live session ever would.
+
+You can continue running new rounds from where you left off — the only thing you need to re-enter is your API key.
 
 ### Manual export
 

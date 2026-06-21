@@ -1,5 +1,61 @@
 # Changelog
 
+## v4.9.2
+
+### Session import: full panel and state reconstruction (issue #4)
+
+#### Problem
+
+v4.7.0 fixed the *functional* half of session import: `S.genBlocks` and `S.compressedGen` were exported and restored, so a session could be continued correctly after import. What remained broken was the *visual* half — `importSession()` never touched `panel-gen`, `panel-deb`, or `panel-syn`, so those three tabs stayed on their empty-state placeholder regardless of how many rounds the session actually had. A fourth tab, Next Round, had the same problem but wasn't on record anywhere: `S.pairingProposals`/`S.retirementProposals` were never restored, so any pending proposals from the session's last round vanished silently. Several other pieces of session-level state were also dropped without anyone having flagged it as a gap: provider, depth, synthesis model, which agents were toggled on, and session cost.
+
+#### Panel reconstruction
+
+Three new functions — `rebuildGenerationPanel()`, `rebuildDebatePanel()`, `rebuildSynthesisPanel()` — rebuild each tab to match exactly what the session looked like at export time. This is not a generic "replay every round" routine: Generation accumulates cards across rounds live (new agents get new cards; existing ones are never re-rendered), while Debate and Synthesis both clear and redraw on every round (`panel.innerHTML=''` at the top of `runDebate()` and `runSynthesis()`). Faithful reconstruction has to track this distinction per panel — `rebuildGenerationPanel()` groups agents by the round each first generated in, while `rebuildDebatePanel()`/`rebuildSynthesisPanel()` render only the most recent round.
+
+The debate/synthesis behaviour went through a real correction during this release: the initial implementation (matching an earlier internal spec that called for showing all rounds stacked on import, reasoning that live never lets you scroll back to see them) was shipped, then caught by comparing a live multi-round session against its own re-import side by side — the debate and synthesis panels showed materially more history after import than the live session ever displayed at any point. Both were rewritten to show only the last round, matching live exactly. `rebuildGenerationPanel()` was unaffected, since generation genuinely is cumulative live.
+
+`rebuildGenerationPanel()` does not surface reflection-extended directions (`S.genBlocks[id].extensions`) — live `panel-gen` doesn't either; `runReflectionRound()`'s extension call has `onChunk:()=>{}` and never touches the DOM. Showing extensions in the generation panel, live and on import, is tracked as a separate, larger piece of work (it needs a persistent agent→card DOM registry that survives across rounds and across an import-then-continue session, plus UX decisions about streaming and badge state) rather than bundled into this fix.
+
+#### Pairing-type fix
+
+Debate cards need a pairing type (CONTRADICTION / INTERSECTION / DISRUPTION / BRIDGE) to render correctly. The type lives in `S.pairingProposals`, but a round's own `pairingProposals` describes the *next* round's proposed pairs — `runMeta()` sets them at the end of synthesis, and `saveRound()` captures whatever's there immediately after, so they're one round ahead of the debate they get used for. Rather than reconstruct the type via a same-round-minus-one lookup against that offset field, `runDebate()` now captures the type directly into `S.currentDebateTypes` at the moment each debate pair is actually launched (`activePairs` already has `.type` available at that point — nothing new to compute), and `saveRound()` stores it as `debateTypes` on that round's own record. `rebuildDebatePanel()` reads it with no cross-round logic at all.
+
+#### Removing redundant per-round snapshots
+
+`saveRound()` no longer stores `genBlocks` or `agentReflections` per round. Both already extends-removed-redundancy in v4.7.0 (`generationOutputs`), but the deeper redundancy survived: `saveRound()` was deep-cloning the *entire current* `S.genBlocks`/`S.agentReflections` into every round's record — meaning by round N, a session had stored N copies of round 1's content. Measured on a real 4-round/3-agent session: the per-round `genBlocks` snapshots accounted for 27.5% of the total export size (51,492 of 187,317 bytes) to represent 22,663 bytes of actually-unique content — a 2.3× redundancy factor that grows roughly triangularly with round count. `agentReflections` had the identical pattern (2.05× on the same session) and, unlike `genBlocks`, had zero readers anywhere in the codebase — pure write-only bloat.
+
+Both are already captured once, undeduplicated, at the top level of the export (`S.genBlocks`/`S.agentReflections` in `buildExportData()`), and every entry within them is tagged with its own origin round (`initial.round`, `extensions[i].round`), so per-round derivation never needed a full re-snapshot. `renderLog()` and `buildMd()` now derive per-round generation info from the single cumulative `S.genBlocks`, filtered by round tag — which also fixed a duplication bug in the Markdown export's per-round Generation sections that had the same root cause and had gone unnoticed (each round's section was showing cumulative text, repeating prior rounds' extensions).
+
+#### State restoration
+
+`importSession()` now restores, in addition to what v4.7.0 already handled:
+
+- **Provider** — via `setProvider()`, so the correct API key field is shown and any further calls go to the right provider. Previously this silently stayed on whatever the tool's current default was, regardless of which provider the imported session actually used.
+- **Depth** — now an explicit top-level export field (`buildExportData()` gains `depth: S.depth`) rather than something to infer from a round record, restored via `setDepth()` so the sidebar buttons reflect it correctly.
+- **Synthesis model** — `synthesisModel` added to the export, restored via `setSynthModel()`. Anthropic-only; harmless no-op on Gemini sessions.
+- **Selected agents** — `S.selectedAgents` is now exported and restored as its own explicit field, not inferred. An earlier version of this fix inferred selection from `S.genBlocks` keys (agents with output); both are wrong, in different ways, for the same reason: `agentMandates` always contains the full static roster regardless of participation, so it can't distinguish "ran" from "exists," and `genBlocks` keys reflect "ever generated," not "currently toggled on" — an agent switched off mid-session via `toggleAgent()` after already producing output would be incorrectly marked selected by that inference. Explicit storage avoids both failure modes and is consistent with this codebase's existing *prefer data over text reconstruction* principle (see CONTRIBUTING.md).
+- **Session cost** — `costS` restored from `data.sessionCost`, so the cost panel reflects actual historical spend on the imported session rather than resetting to $0. Uses the totals as recorded at export time, not current pricing re-applied — API pricing changes over time, and the number that matters is what the session actually cost.
+- **Pending Next Round proposals** — `S.pairingProposals`/`S.retirementProposals` restored from the most recent round's record and rendered via `renderPairingsPanel()`, so the Next Round tab shows whatever was pending rather than "No proposals yet." This also fixes a previously-unnoticed side effect: `renderAgentList()` reads `S.pairingProposals` for each agent's debate-count badge, so that badge was silently showing 0 for every agent after any import, even though the agent list itself was otherwise correct.
+- **Current debate buffer** — `S.currentDebate`/`S.currentDebateTypes` restored from the most recent round, for state completeness. Every existing continuation path resets this before reading it, so nothing currently depends on it being pre-populated — included anyway as a safety net for future code.
+
+Tab counts (`gen`/`deb`/`syn`) on import match live behaviour exactly, which turned out *not* to be cumulative: the live UI overwrites these on every relevant round rather than accumulating (`tc('syn',1)` is set after every synthesis — literally always 1, never a running total). Import reproduces whatever the last relevant round would have last set it to, not a total across the session.
+
+#### Other fixes in this release
+
+- Removed the synthesis-card model-name label (`sonnet`/`opus`) — it was wrong on any non-Anthropic session (defaulted to showing "sonnet" regardless of the actual provider or model used, since `S.synthesisModel` only has meaning on the Anthropic path) and added no information the cost panel doesn't already convey. Pre-existing bug, unrelated to import; removed rather than fixed since it wasn't providing real value.
+- Removed the unused **reset** button from the cost panel header (`resetCost()`) — no clear use case, and dead weight in the UI.
+- Default depth changed from `detailed` to `brief`.
+
+#### State changes
+
+Round records (`S.rounds[i]`, and the corresponding `rounds[]` entries in the JSON export) gain `debateTypes: {pairKey: type}` and no longer carry `genBlocks` or `agentReflections` — both remain available, undeduplicated, via the top-level `S.genBlocks`/`S.agentReflections` export fields. The top-level export gains `selectedAgents: string[]`, `depth: string`, and `synthesisModel: string`. No backward-compatibility shim was added for sessions exported before this change — the codebase is in a rapid development phase and isn't carrying that cost yet.
+
+#### Not addressed here
+
+Testing this release surfaced `extends_unresolved` labels appearing in the research map of a session that had been imported partway through. Traced directly: `existingMap` (used to resolve `EXTENDS: RN-n` references during synthesis parsing) is `[...S.researchMap]`, fully and correctly restored by import — confirmed by diffing the label distribution in the export against the same distribution immediately after import; they're identical. The actual cause is the same-round-sibling reference gap already documented in v4.9.1 and tracked in issue #21: every affected entry referenced another entry from its own round's synthesis output, which only exists in `workingMap` (this round's provisional entries) at parse time, not yet in `existingMap`. Confirmed unrelated to import and explicitly out of scope for this release.
+
+---
+
 ## v4.9.1
 
 ### Direction labeling: SAME AS, EXTENDS, NEW DIRECTION, and SUMMARY fields (issue #21)
