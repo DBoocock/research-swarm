@@ -41,7 +41,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 .cost-panel-hdr{font-size:10px;color:var(--text3);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;}
 .cost-panel-hdr button{font-family:var(--mono);font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;text-decoration:underline;}
 .cost-panel-hdr button:hover{color:var(--text2);}
-.cost-total{display:flex;align-items:baseline;gap:6px;margin-bottom:6px;}
+.cost-total{display:flex;align-items:baseline;gap:6px;margin-bottom:2px;}
+.cost-thread{display:flex;align-items:baseline;gap:6px;margin-bottom:6px;}
+.cost-thread-amount{font-size:12px;font-weight:400;color:var(--text3);font-family:var(--mono);}
 .cost-amount{font-size:18px;font-weight:500;color:var(--text);}
 .cost-sublabel{font-size:11px;color:var(--text3);}
 .cost-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;}
@@ -342,6 +344,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
   <div class="cost-panel">
     <div class="cost-panel-hdr"><span id="cost-panel-title">Session cost</span></div>
     <div class="cost-total"><span class="cost-amount" id="cost-total">$0.0000</span><span class="cost-sublabel" id="cost-sublabel">this session</span></div>
+    <div class="cost-thread" id="cost-thread-row" style="display:none"><span class="cost-thread-amount" id="cost-thread-total">$0.0000</span><span class="cost-sublabel">thread total</span></div>
     <div class="cost-grid">
       <div class="cc"><span class="cc-label">Input tok</span><span class="cc-val" id="ci">0</span></div>
       <div class="cc"><span class="cc-label">Output tok</span><span class="cc-val" id="co">0</span></div>
@@ -681,6 +684,7 @@ let S={
   apiKeys:{anthropic:'',gemini:''}, // populated from sidebar inputs; never exported
   depth:'brief',
   synthesisModel:'sonnet', // 'sonnet' | 'opus' — controls synthesis, meta-agent, and roster calls (Anthropic only)
+  cumulativeCostBaseline:0, // running total carried in from import; current session's spend (costS.total) adds on top
   selectedAgents:new Set(DEFAULT_AGENTS.map(a=>a.id)),
   agentStatuses:Object.fromEntries(DEFAULT_AGENTS.map(a=>[a.id,'active'])), // active|genonly|retired|promoted
   currentRound:0, running:false,
@@ -870,6 +874,17 @@ function renderCost(){
   const callCount=costS.callCount||0;
   // Always show dollar cost — charges are real on Gemini paid tier
   document.getElementById('cost-total').textContent='$'+costS.total.toFixed(4);
+  // Thread total: this session's spend on top of all prior sessions in the import chain.
+  // Row is hidden on a fresh session (no baseline) so the two numbers are never
+  // shown as identical — they only diverge once a session has been imported.
+  const baseline=S.cumulativeCostBaseline||0;
+  const threadRow=document.getElementById('cost-thread-row');
+  if(baseline>0){
+    document.getElementById('cost-thread-total').textContent='$'+(baseline+costS.total).toFixed(4);
+    if(threadRow)threadRow.style.display='';
+  } else {
+    if(threadRow)threadRow.style.display='none';
+  }
   document.getElementById('ci').textContent=costS.inp.toLocaleString();
   document.getElementById('co').textContent=costS.out.toLocaleString();
   document.getElementById('ccr').textContent=costS.cr.toLocaleString();
@@ -3160,6 +3175,7 @@ function buildExportData(){
     selectedAgents:[...S.selectedAgents],
     agentMandates:Object.fromEntries(agents.map(a=>[a.id,{name:a.name,color:a.color,mandate:a.mandate,status:S.agentStatuses[a.id]||'active'}])),
     sessionCost:{total:costS.total,saved:costS.saved,inputTok:costS.inp,outputTok:costS.out,cacheReads:costS.cr,cacheWrites:costS.cw},
+    cumulativeCost:(S.cumulativeCostBaseline||0)+costS.total,
     rounds:S.rounds,researchMap:S.researchMap,contradictions:S.contradictions,
     matrix:S.matrix,overlapScores:S.overlapScores,
     agentReflections:S.agentReflections,
@@ -3333,19 +3349,12 @@ function importSession(event){
       // anyway for state fidelity and as a safety net for future code.
       S.currentDebate=lastRound?{...lastRound.debateOutputs}:{};
       S.currentDebateTypes=lastRound?{...lastRound.debateTypes}:{};
-      // Restore this session's cost so the cost panel reflects actual historical
-      // spend rather than resetting to $0 — informational, but matters for
-      // budget awareness before deciding whether to run more rounds. Uses
-      // historical totals as recorded, not current pricing re-applied.
-      if(data.sessionCost){
-        costS={
-          inp:data.sessionCost.inputTok||0,out:data.sessionCost.outputTok||0,
-          cr:data.sessionCost.cacheReads||0,cw:data.sessionCost.cacheWrites||0,
-          total:data.sessionCost.total||0,saved:data.sessionCost.saved||0,
-          calls:[] // per-call log isn't exported; starts empty, fills in as new calls happen
-        };
-        renderCost();
-      }
+      // Restore cumulative thread cost — the sum of all prior sessions in this
+      // import chain. costS resets to $0 so "this session" tracks only calls
+      // made in the current page load; the thread total is shown alongside.
+      S.cumulativeCostBaseline=data.cumulativeCost||0;
+      costS={inp:0,out:0,cr:0,cw:0,total:0,saved:0,calls:[]};
+      renderCost();
       // Rebuild all panels
       renderAgentList();
       renderLog();
