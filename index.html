@@ -688,7 +688,7 @@ let S={
   selectedAgents:new Set(DEFAULT_AGENTS.map(a=>a.id)),
   agentStatuses:Object.fromEntries(DEFAULT_AGENTS.map(a=>[a.id,'active'])), // active|genonly|retired|promoted
   currentRound:0, running:false,
-  genBlocks:{}, compressedGen:{}, currentDebate:{}, currentDebateTypes:{}, currentSynthesis:null,
+  genBlocks:{}, compressedGen:{}, currentDebates:{}, currentSynthesis:null,
   pairingProposals:[], retirementProposals:[],
   rounds:[],
   researchMap:[], contradictions:[],
@@ -1350,7 +1350,7 @@ async function runGen(){
   S.running=true;lockTabs();
   if(isFirstRound) S.currentRound++;
   // Don't clear S.genBlocks — preserve existing outputs for agents not in this run
-  if(isFirstRound){ S.genBlocks={}; S.compressedGen={}; S.currentDebate={}; S.currentDebateTypes={}; S.agentReflections={}; }
+  if(isFirstRound){ S.genBlocks={}; S.compressedGen={}; S.currentDebates={}; S.agentReflections={}; }
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-gen');
   // On subsequent rounds, add new agent cards without clearing existing ones
@@ -1453,7 +1453,7 @@ async function runDebate(){
   if(S.running)return;
   const activePairs=S.pairingProposals.filter(p=>p.enabled);
   if(!activePairs.length){setStatus('No pairs enabled.');return;}
-  S.running=true;lockTabs();S.currentDebate={};S.currentDebateTypes={};
+  S.running=true;lockTabs();S.currentDebates={};
   S.currentRound++; // increment here — debate rounds are the primary round boundary
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-deb');panel.innerHTML='';
@@ -1476,8 +1476,8 @@ async function runDebate(){
   const pairBodyEls={};
   activePairs.forEach(pair=>{
     const key=pair.id1+'_'+pair.id2;
-    S.currentDebateTypes[key]=pair.type; // captured here, at launch time, so saveRound() can
-                                          // store it on THIS round's record — no cross-round lookup needed
+    S.currentDebates[key]={text:'',type:pair.type}; // initialised at launch time — type is deterministic,
+                                                     // text is filled in once the API call resolves
     const a1=agents.find(a=>a.id===pair.id1),a2=agents.find(a=>a.id===pair.id2);
     const card=makeDebateCard(a1,a2,pair.type);panel.appendChild(card);
     pairBodyEls[key]=card.querySelector('.rcard-body');
@@ -1545,12 +1545,12 @@ async function runDebate(){
             const rawEnd=i+1<delimiters.length?result.indexOf(delimiters[i+1]):result.length;
             const end=rawEnd===-1?result.length:rawEnd;
             const chunk=start!==-1?result.slice(start+delimiters[i].length,end).trim():result;
-            S.currentDebate[id1+'_'+p.id]=chunk;
+            S.currentDebates[id1+'_'+p.id].text=chunk;
             if(pairBodyEls[id1+'_'+p.id])pairBodyEls[id1+'_'+p.id].innerHTML=chunk;
           });
         } else {
           const key=id1+'_'+partners[0].id;
-          S.currentDebate[key]=result;
+          S.currentDebates[key].text=result;
           if(pairBodyEls[key])pairBodyEls[key].innerHTML=result;
         }
       });
@@ -1608,7 +1608,7 @@ async function runReflectionRound(activePairs){
     const critiquesReceived=[];    // debates where this agent was id2 (the critiqued)
     activePairs.forEach(p=>{
       const key=p.id1+'_'+p.id2;
-      const debateText=S.currentDebate[key];
+      const debateText=S.currentDebates[key]?.text;
       if(!debateText)return;
       const partnerName=agentId===p.id1
         ?agents.find(a=>a.id===p.id2)?.name||p.id2
@@ -1747,7 +1747,7 @@ async function runSynthesis(includeDebate){
       setStatus('Compressing generation outputs for synthesis...');
       const genSummaries=await compressGenerationOutputs();
       genSummaries.forEach(({name,summary})=>{allOutputs+=`\n\n=== ${name.toUpperCase()} (generation summary) ===\n${summary}`;});
-      Object.entries(S.currentDebate).forEach(([key,text])=>{
+      Object.entries(S.currentDebates).forEach(([key,{text}])=>{
         const[id1,id2]=key.split('_');
         const n1=agents.find(a=>a.id===id1)?.name||id1;
         const n2=agents.find(a=>a.id===id2)?.name||id2;
@@ -1970,7 +1970,7 @@ async function runAttribution(newDirections){
   if(!activeAgents.length)return;
 
   // Debate pairs from this round — may be empty on post-generation synthesis
-  const debatePairs=Object.keys(S.currentDebate).map(key=>{
+  const debatePairs=Object.keys(S.currentDebates).map(key=>{
     const[id1,id2]=key.split('_');
     const n1=agents.find(a=>a.id===id1)?.name||id1;
     const n2=agents.find(a=>a.id===id2)?.name||id2;
@@ -2089,7 +2089,7 @@ function buildHandoverContext(item){
   const attributedDebate=(item.debateRefs||[])
     .map(ref=>{
       const round=S.rounds.find(r=>r.round===ref.round);
-      const text=round?.debateOutputs?.[ref.key]||'(not found in session export)';
+      const text=round?.debates?.[ref.key]?.text||'(not found in session export)';
       const[id1,id2]=ref.key.split('_');
       const n1=agents.find(a=>a.id===id1)?.name||id1;
       const n2=agents.find(a=>a.id===id2)?.name||id2;
@@ -3073,12 +3073,12 @@ function rebuildDebatePanel(){
   const panel=document.getElementById('panel-deb');panel.innerHTML='';
   if(!S.rounds.length)return;
   const lastRound=S.rounds[S.rounds.length-1];
-  if(!Object.keys(lastRound.debateOutputs).length)return; // e.g. session never advanced past round 1
+  if(!Object.keys(lastRound.debates||{}).length)return; // e.g. session never advanced past round 1
   panel.appendChild(makeRoundHdr(`Round ${lastRound.round} — Debate`,'done'));
-  Object.entries(lastRound.debateOutputs).forEach(([key,text])=>{
+  Object.entries(lastRound.debates||{}).forEach(([key,{text,type}])=>{
     const[id1,id2]=key.split('_');
     const a1=agents.find(a=>a.id===id1),a2=agents.find(a=>a.id===id2);
-    const card=makeDebateCard(a1,a2,lastRound.debateTypes?.[key]||'DEBATE');
+    const card=makeDebateCard(a1,a2,type||'DEBATE');
     card.querySelector('.rcard-body').textContent=text;
     panel.appendChild(card);
   });
@@ -3107,7 +3107,7 @@ function saveRound(includeDebate){
   const seqNum = S.rounds.length + 1;
   S.rounds.push({
     round:seqNum,ts:new Date().toISOString(),depth:S.depth,
-    debateOutputs:{...S.currentDebate},debateTypes:{...S.currentDebateTypes},
+    debates:{...S.currentDebates},
     synthesis:S.currentSynthesis,pairingProposals:[...S.pairingProposals],
     retirementProposals:[...S.retirementProposals]
     // genBlocks and agentReflections intentionally NOT snapshotted here — both are
@@ -3128,7 +3128,7 @@ function renderLog(){
     const genNames=Object.entries(S.genBlocks)
       .filter(([id,blocks])=>blocks.initial.round===r.round||blocks.extensions.some(e=>e.round===r.round))
       .map(([id])=>agents.find(a=>a.id===id)?.name||id);
-    const debCount=Object.keys(r.debateOutputs).length;
+    const debCount=Object.keys(r.debates||{}).length;
     div.innerHTML=`<div class="log-entry-hdr"><span class="badge b-done">done</span><span style="font-size:12px;color:var(--text2);flex:1;margin-left:6px;">Round ${r.round} · ${r.depth} · ${new Date(r.ts).toLocaleTimeString()}</span></div>
       <div class="log-entry-body">${genNames.length} agents · ${debCount} debate outputs\n\n${r.synthesis?r.synthesis.slice(0,400)+'…':'(no synthesis)'}</div>`;
     p.appendChild(div);
@@ -3211,12 +3211,11 @@ function buildMd(){
       const n=agents.find(a=>a.id===id)?.name||id;
       out+=`#### ${n}\n${text}\n\n`;
     });
-    if(Object.keys(r.debateOutputs).length){
+    if(Object.keys(r.debates||{}).length){
       out+=`### Debate\n\n`;
-      Object.entries(r.debateOutputs).forEach(([key,text])=>{
+      Object.entries(r.debates||{}).forEach(([key,{text,type}])=>{
         const[id1,id2]=key.split('_');
         const n1=agents.find(a=>a.id===id1)?.name||id1,n2=agents.find(a=>a.id===id2)?.name||id2;
-        const type=r.debateTypes?.[key];
         out+=`#### ${n1} → ${n2}${type?' ['+type+']':''}\n${text}\n\n`;
       });
     }
@@ -3338,17 +3337,16 @@ function importSession(event){
       // Restore pending Next Round proposals — these live on the MOST RECENT
       // round's record (runMeta() proposes pairs for the round after the one
       // that just finished; saveRound() captures them immediately after —
-      // see rebuildDebatePanel()'s debateTypes for the same timing in reverse).
+      // see rebuildDebatePanel()'s type look-up for the same timing in reverse).
       const lastRound=data.rounds&&data.rounds.length?data.rounds[data.rounds.length-1]:null;
       S.pairingProposals=lastRound?[...(lastRound.pairingProposals||[])]:[];
       S.retirementProposals=lastRound?[...(lastRound.retirementProposals||[])]:[];
-      // Restore the live "current debate" buffer from the most recent round.
+      // Restore the live "current debates" buffer from the most recent round.
       // Note: every existing continuation path (runDebate → runReflectionRound →
       // runSynthesis) resets this at the start of a new debate round before
       // anything reads it, so nothing currently depends on this — restored
       // anyway for state fidelity and as a safety net for future code.
-      S.currentDebate=lastRound?{...lastRound.debateOutputs}:{};
-      S.currentDebateTypes=lastRound?{...lastRound.debateTypes}:{};
+      S.currentDebates=lastRound?{...lastRound.debates}:{};
       // Restore cumulative thread cost — the sum of all prior sessions in this
       // import chain. costS resets to $0 so "this session" tracks only calls
       // made in the current page load; the thread total is shown alongside.
@@ -3376,7 +3374,7 @@ function importSession(event){
       const genRounds=Object.values(S.genBlocks).map(b=>b.initial.round);
       const lastGenRound=genRounds.length?Math.max(...genRounds):0;
       tc('gen',genRounds.filter(r=>r===lastGenRound).length);
-      tc('deb',lastRound?Object.keys(lastRound.debateOutputs).length:0);
+      tc('deb',lastRound?Object.keys(lastRound.debates||{}).length:0);
       tc('syn',S.rounds.length?1:0);
       setStatus(`Session imported: ${S.rounds.length} round${S.rounds.length!==1?'s':''} restored. API key required to continue.`);
       switchTab('log');
