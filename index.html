@@ -1604,6 +1604,7 @@ async function runReflectionRound(activePairs){
   if(!debatingAgents.length)return;
 
   setStatus(`Reflection — ${debatingAgents.length} agent${debatingAgents.length>1?'s':''} processing debate outputs...`);
+  switchTab('gen');
 
   // Build per-agent pipeline: Call 1 (reflection) then Call 2 (generation extension)
   const makeAgentReflection=agent=>{
@@ -1774,7 +1775,23 @@ async function runReflectionRound(activePairs){
 }
 
 
+// Retry handler — called by the button injected into the synthesis error card.
+// Re-runs synthesis with the same arguments as the failed attempt, which is safe:
+// compression is idempotent (skips already-compressed blocks), and parseSynthesis /
+// runMeta only run after a successful API call, so state is clean for a retry.
+async function retrySynthesis(){
+  if(S.running||!S._pendingSynthesisArgs)return;
+  S.running=true;lockTabs();
+  document.getElementById('run-btn').disabled=true;
+  await runSynthesis(S._pendingSynthesisArgs.includeDebate);
+  S.running=false;unlockTabs();
+  document.getElementById('run-btn').disabled=false;
+  renderPairingsPanel(); // re-render so launch button reflects correct state
+}
+
 async function runSynthesis(includeDebate){
+  // Record arguments so retrySynthesis() can replay this call if it fails.
+  S._pendingSynthesisArgs={includeDebate};
   const panel=document.getElementById('panel-syn');panel.innerHTML='';
   const hdr=makeRoundHdr('Synthesis','running');panel.appendChild(hdr);switchTab('syn');
 
@@ -1901,17 +1918,26 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     await runAttribution([...newEntries, ...reusedEntries]);
     await runMeta(result);
     saveRound(includeDebate);
+    S._pendingSynthesisArgs=null;   // synthesis completed — no retry pending
     autoExportJson();
     autoExportMd();
   }catch(e){
     if(e.name==='AbortError')return;
-    // Show the error inside the synthesis panel so the user knows what happened,
-    // rather than leaving a blank "running" card with no explanation.
+    // Show error and a retry button so the user can re-attempt synthesis without
+    // repeating the debate and reflection steps that completed successfully.
     const synBody=document.getElementById('syn-body');
-    if(synBody)synBody.innerHTML=`<span style="color:var(--danger)">Synthesis error: ${e.message}</span>`;
+    if(synBody){
+      synBody.innerHTML='';
+      const errMsg=document.createElement('span');
+      errMsg.style.color='var(--danger)';
+      errMsg.textContent=`Synthesis error: ${e.message}`;
+      synBody.appendChild(errMsg);
+      synBody.appendChild(mkBtn('retry synthesis →','sm-btn',retrySynthesis,
+        'display:block;margin-top:10px;'));
+    }
     sc.querySelector('.badge').className='badge b-err';sc.querySelector('.badge').textContent='error';
     updateRoundHdr(hdr,'error');
-    setStatus('Synthesis error: '+e.message);
+    setStatus('Synthesis error: '+e.message+' — click "retry synthesis" in the synthesis panel to try again.');
   }
 }
 
@@ -3227,6 +3253,7 @@ function setLastExport(fname,type){
 function buildExportData(){
   return{exportTime:new Date().toISOString(),provider:S.provider||'gemini',brief,
     reflectionsEnabled:S.reflectionsEnabled,depth:S.depth,synthesisModel:S.synthesisModel,
+    currentRound:S.currentRound,
     selectedAgents:[...S.selectedAgents],
     agentMandates:Object.fromEntries(agents.map(a=>[a.id,{name:a.name,color:a.color,mandate:a.mandate,status:S.agentStatuses[a.id]||'active'}])),
     sessionCost:{total:costS.total,saved:costS.saved,inputTok:costS.inp,outputTok:costS.out,cacheReads:costS.cr,cacheWrites:costS.cw},
@@ -3387,8 +3414,9 @@ function importSession(event){
         const tog=document.getElementById('reflection-toggle');
         if(tog)tog.checked=S.reflectionsEnabled;
       }
-      // Restore round counter
-      if(data.rounds&&data.rounds.length)S.currentRound=Math.max(...data.rounds.map(r=>r.round));
+      // Restore round counter — exported directly so import is exact even when
+      // synthesis failed mid-run and S.currentRound diverged from S.rounds.length.
+      S.currentRound=data.currentRound;
       // Restore pending Next Round proposals — these live on the MOST RECENT
       // round's record (runMeta() proposes pairs for the round after the one
       // that just finished; saveRound() captures them immediately after —
