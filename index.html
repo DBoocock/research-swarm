@@ -702,6 +702,11 @@ let S={
 
 let costS={inp:0,out:0,cw:0,cr:0,total:0,saved:0,calls:[]};
 
+// Registry: agentId → { bodyEl, hdrEl } for the live generation card of each agent.
+// Populated by runGen() and rebuildGenerationPanel(); looked up by runReflectionRound()
+// to append streaming extension output. Module-level so it survives across async calls.
+const genCardEls={};
+
 let _handoverContent='';
 let _handoverTitle='';
 
@@ -1350,7 +1355,7 @@ async function runGen(){
   S.running=true;lockTabs();
   if(isFirstRound) S.currentRound++;
   // Don't clear S.genBlocks — preserve existing outputs for agents not in this run
-  if(isFirstRound){ S.genBlocks={}; S.compressedGen={}; S.currentDebates={}; S.agentReflections={}; }
+  if(isFirstRound){ S.genBlocks={}; S.compressedGen={}; S.currentDebates={}; S.agentReflections={}; Object.keys(genCardEls).forEach(k=>delete genCardEls[k]); }
   document.getElementById('run-btn').disabled=true;
   const panel=document.getElementById('panel-gen');
   // On subsequent rounds, add new agent cards without clearing existing ones
@@ -1372,6 +1377,9 @@ async function runGen(){
     const card=makeResultCard(agent.name,agent.color,'running');
     panel.appendChild(card);cards[agent.id]=card;
     bodyEls[agent.id]=card.querySelector('.rcard-body');
+    // Register card elements in the module-level registry so runReflectionRound()
+    // can look them up later (bodyEls is function-scoped and gone by then).
+    genCardEls[agent.id]={bodyEl:bodyEls[agent.id],hdrEl:card.querySelector('.rcard-hdr')};
     bodyEls[agent.id].innerHTML='<span class="cursor"></span>';
   });
   try{
@@ -1703,18 +1711,59 @@ async function runReflectionRound(activePairs){
       // ── Call 2: Generation extension ────────────────────
       const genExtPrompt=`You have just reflected on your debate exchanges this round. Based on what you learned, extend your research directions.\n\nYOUR RESEARCH OUTPUT (all rounds, chronological — later sections are more recent):\n---\n${flatGen(agentId)||'(none)'}\n---\n\nYOUR REFLECTION:\n---\n${reflectionOutput}\n---\n\nAppend new or deepened research directions that were not in your prior output. Remain largely within your disciplinary framework, or at least draw heavily on your disciplinary framework if the direction is genuinely interdisciplinary. Be specific and technically rigorous. Begin your response directly with your new directions.`;
 
+      // Prepare streaming into the agent's generation card.
+      // The card was registered in genCardEls by runGen() (or rebuildGenerationPanel() on import).
+      const els=genCardEls[agentId];
+      const extBodyEl=els?.bodyEl;
+      let extensionAccumulated='';
+      let extensionTextNode=null;
+      let extCursorEl=null;
+      if(extBodyEl){
+        // Append section header as a text node, then a live text node for streaming content.
+        // Text nodes appended after the existing innerHTML text work correctly and don't
+        // disturb the initial generation text already rendered in the card body.
+        extBodyEl.appendChild(document.createTextNode(`\n\n--- REFLECTION-EXTENDED DIRECTIONS (round ${S.currentRound}) ---\n`));
+        extensionTextNode=document.createTextNode('');
+        extBodyEl.appendChild(extensionTextNode);
+        extCursorEl=document.createElement('span');
+        extCursorEl.className='cursor';
+        extBodyEl.appendChild(extCursorEl);
+      }
+
       return apiStream({
         name:`genext:${agent.name.slice(0,14)}`,
         role:'genextension',
         systemBlocks:agentSystemBlocks(agent.mandate),
         messages:[{role:'user',content:genExtPrompt}],
         signal:new AbortController().signal,
-        onChunk:()=>{}
+        onChunk:chunk=>{
+          extensionAccumulated+=chunk;
+          if(extensionTextNode)extensionTextNode.textContent=extensionAccumulated;
+        }
       }).then(extensionOutput=>{
+        const text=extensionOutput.trim();
         if(!S.genBlocks[agentId]){
           S.genBlocks[agentId]={initial:{round:S.currentRound,text:''},extensions:[]};
         }
-        S.genBlocks[agentId].extensions.push({round:S.currentRound,text:extensionOutput.trim()});
+        S.genBlocks[agentId].extensions.push({round:S.currentRound,text});
+        // Finalise the streamed text and remove the blinking cursor
+        if(extensionTextNode)extensionTextNode.textContent=text;
+        if(extCursorEl)extCursorEl.remove();
+        // Sum the genext call cost into the card's existing cost indicator so the
+        // displayed figure reflects initial + extension spend for that agent.
+        const last=costS.calls[0];
+        if(last&&els){
+          const costSpan=els.hdrEl.querySelector('.rcard-cost');
+          if(costSpan){
+            const prev=parseFloat(costSpan.textContent.slice(1))||0;
+            costSpan.textContent='$'+(prev+last.cost).toFixed(4);
+          }
+          // Add cache hit indicator if this genext call was a cache hit and none shown yet
+          if(last.hit&&!els.hdrEl.querySelector('.rcard-cache')){
+            const s=document.createElement('span');s.className='rcard-cache';s.textContent='⚡';
+            els.hdrEl.appendChild(s);
+          }
+        }
       });
     });
   };
@@ -3025,17 +3074,10 @@ function renderOverlapMatrix(){
   p.appendChild(note);
 }
 
-// ══════════════════════════════════════════════════════════
-// IMPORT RECONSTRUCTION — Generation / Debate / Synthesis panels
-// ══════════════════════════════════════════════════════════
-// These mirror what runGen()/runDebate()/runSynthesis() actually render live —
-// not a generic "replay everything" — so an imported session looks identical
-// to one that ran in this browser the whole way through. In particular:
-// reflection-extended directions are never shown in panel-gen live, so they
-// are not shown here either (see issue: live generation panel should display
-// reflection-extended directions, filed separately).
 function rebuildGenerationPanel(){
   const panel=document.getElementById('panel-gen');panel.innerHTML='';
+  // Clear any stale registry entries — the old DOM nodes were just destroyed above.
+  Object.keys(genCardEls).forEach(k=>delete genCardEls[k]);
   if(!Object.keys(S.genBlocks).length)return;
   // Group agents by the round in which they FIRST generated. S.genBlocks is the
   // single cumulative source of truth (already restored by this point in
@@ -3057,8 +3099,21 @@ function rebuildGenerationPanel(){
       const agent=agents.find(a=>a.id===agentId);
       if(!agent)return;
       const card=makeResultCard(agent.name,agent.color,'done');
-      card.querySelector('.rcard-body').textContent=S.genBlocks[agentId].initial.text;
+      const bodyEl=card.querySelector('.rcard-body');
+      const blocks=S.genBlocks[agentId];
+      // Render initial text as a text node, then append any existing extensions
+      // using the same deterministic header format used by flatGen() and buildMd().
+      bodyEl.appendChild(document.createTextNode(blocks.initial.text));
+      blocks.extensions.forEach(ext=>{
+        bodyEl.appendChild(document.createTextNode(
+          `\n\n--- REFLECTION-EXTENDED DIRECTIONS (round ${ext.round}) ---\n${ext.text}`
+        ));
+      });
       panel.appendChild(card);
+      // Register card in the module-level registry so that if the user continues
+      // this imported session and runs more reflection rounds, extensions append
+      // to the correct (reconstructed) card rather than failing to find one.
+      genCardEls[agentId]={bodyEl,hdrEl:card.querySelector('.rcard-hdr')};
     });
   });
 }
