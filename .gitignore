@@ -26,3 +26,6 @@ tmp/
 # identity and competitive landscape are still settling. Commit when the position
 # feels earned rather than asserted. See docs/POSITIONING.md on disk.
 docs/POSITIONING.md
+
+# Prompt templates
+prompt_templates/
