@@ -107,7 +107,7 @@ The swarm operates as an iterative loop of generation, debate, and synthesis rou
            └──────────────────────────────────────────┘
 ```
 
-**Generation round**: Selected agents receive the shared research brief plus their individual specialist mandate. On the first round all selected agents run; on subsequent rounds only newly added agents run — existing generation outputs are preserved. On the Anthropic path, agents run in primer-then-parallel order (the first agent alone to write the prompt cache, then the rest in parallel reading from it). On Gemini, all agents run in true parallel with no sequencing overhead.
+**Generation round**: Selected agents receive the shared research brief plus their individual specialist mandate. On the first round all selected agents run; on subsequent rounds only newly added agents run — existing generation outputs are preserved. On the Anthropic path, agents run in primer-then-parallel order (the first agent alone to write the prompt cache, then the rest in parallel reading from it). On Gemini, DeepSeek, and OpenAI, all agents run in true parallel with no sequencing overhead — prompt caching is Anthropic-specific.
 
 **Debate round**: Agents are assigned one or more partners whose generation output they read and respond to. Multiple pairings per agent are allowed and encouraged. Debates are batched: an agent with three partners makes one API call rather than three, with responses labelled per partner. Pairings are proposed by the meta-agent after each synthesis and reviewed by you before the debate launches.
 
@@ -128,7 +128,7 @@ This cycle repeats. Research directions, contradictions, and matrix entries accu
 ### Requirements
 
 - A modern web browser (Chrome, Firefox, Safari, Edge)
-- A free Google Gemini API key **or** an Anthropic API key — see below
+- An API key for one of the supported providers — Google Gemini (free tier available), Anthropic, DeepSeek, or OpenAI — see below
 
 ### Quickstart — hosted version
 
@@ -163,6 +163,8 @@ If you prefer to run the tool locally or want to modify the code:
 4. Select your API provider in the sidebar and enter the corresponding key:
    - **Google Gemini** (default): get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
    - **Anthropic**: get a key at [console.anthropic.com](https://console.anthropic.com) (requires billing)
+   - **DeepSeek**: get a key at [platform.deepseek.com](https://platform.deepseek.com) (requires billing; the cheapest of the four providers)
+   - **OpenAI**: get a key at [platform.openai.com](https://platform.openai.com) (requires billing)
 
 No environment variables are needed — API keys are entered directly in the sidebar.
 
@@ -183,7 +185,21 @@ Gemini 2.5 Flash is available on a free tier with a daily request quota. For reg
 3. Add a payment method and a small credit balance — a typical round (generation + debate + reflection + synthesis, 10 agents, detailed depth) costs $0.25–0.35 with the reflection round enabled; the first round of a session is ~$0.35 due to the cache write. A four-round session costs approximately $0.80–1.20 with reflections enabled
 4. Select **Anthropic** in the provider section and paste the key — your browser's password manager can save it
 
-> **Note**: The Anthropic API is billed separately from a Claude.ai Pro subscription. Both providers are available simultaneously in the sidebar; you can switch between them at any time.
+> **Note**: The Anthropic API is billed separately from a Claude.ai Pro subscription. All four providers are available simultaneously in the sidebar; you can switch between them at any time.
+
+**DeepSeek (paid, parallel, no prompt caching)**
+
+1. Go to [platform.deepseek.com](https://platform.deepseek.com) and create an account
+2. Navigate to **API Keys** and create a new key
+3. Add a payment method — DeepSeek is the cheapest provider supported here by a wide margin (see [pricing](#model-selection-and-pricing)); a full detailed-depth session with reflections enabled typically costs under $0.10
+4. Select **DeepSeek** in the provider section and paste the key
+
+**OpenAI (paid, parallel, no prompt caching)**
+
+1. Go to [platform.openai.com](https://platform.openai.com) and create an account
+2. Navigate to **API Keys** and create a new key
+3. Add a payment method — pricing is broadly comparable to Anthropic; see [pricing](#model-selection-and-pricing)
+4. Select **OpenAI** in the provider section and paste the key
 
 ---
 
@@ -196,7 +212,7 @@ The interface is divided into a **sidebar** (always visible) and a **main panel*
 | Section | Purpose |
 |---|---|
 | **Swarm title** (clickable) | Opens the brief editor modal |
-| **Provider** | Gemini (default) or Anthropic — radio selector + key field |
+| **Provider** | Gemini (default), Anthropic, DeepSeek, or OpenAI — radio selector + key field |
 | **Session cost** | Live cost tracker with cache hit rate |
 | **Agents** | Agent list with status, edit, and delete controls |
 | **Synthesis model** | Standard / Premium toggle (hidden for Gemini) |
@@ -446,25 +462,25 @@ The sidebar shows live session cost broken down by:
 - Cache writes (one-time cost per cached block)
 - **Saved via caching**: the cumulative saving compared to sending uncached input
 
-A cache hit rate bar shows what fraction of input tokens are being served from cache. Each entry in the per-call log shows the call name, a three-letter model indicator (snt / ops / hku), cost, and a ⚡ indicator with cache-read token count if the call hit the cache.
+A cache hit rate bar shows what fraction of input tokens are being served from cache. Each entry in the per-call log shows the call name, a short model indicator (e.g. `snt`/`ops` for Sonnet/Opus, `hku` for Haiku, `fls`/`flt` for Gemini Flash/Flash Lite, `ds` for DeepSeek, `o3`/`mini` for OpenAI's o3/GPT-4.1 mini), cost, and a ⚡ indicator with cache-read token count if the call hit the cache.
 
 ### Model selection and pricing
 
-Different call types use different models, selectable or fixed:
+Different call types use different models, selectable or fixed. Every provider follows the same pattern: a strong model for reasoning-heavy, agent-attributed calls, and a cheap model for constrained/closed-set tasks — except DeepSeek, which currently uses the same model for both tiers (no separate cheap model is configured for it yet).
 
-| Call type | Anthropic model | Gemini model | Control |
-|---|---|---|---|
-| Generation | Sonnet 4.6 | 2.5 Flash | Fixed |
-| Debate | Sonnet 4.6 | 2.5 Flash | Fixed |
-| Reflection | Sonnet 4.6 | 2.5 Flash | Fixed (strong model required) |
-| Generation extension | Sonnet 4.6 | 2.5 Flash | Fixed (strong model required) |
-| Synthesis | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | **Sonnet/Opus toggle** (Anthropic only) |
-| Meta-agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
-| Roster agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
-| Handover document | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | Follows synthesis toggle |
-| Generation compression | Haiku 4.5 | **2.5 Flash Lite** | Fixed (simple summarisation) |
-| Direction attribution | Haiku 4.5 | **2.5 Flash Lite** | Fixed (closed-set classification) |
-| Mandate generation | Haiku 4.5 | **2.5 Flash Lite** | Fixed (simple drafting) |
+| Call type | Anthropic | Gemini | DeepSeek | OpenAI | Control |
+|---|---|---|---|---|---|
+| Generation | Sonnet 4.6 | 2.5 Flash | v4 Flash | GPT-4.1 | Fixed |
+| Debate | Sonnet 4.6 | 2.5 Flash | v4 Flash | GPT-4.1 | Fixed |
+| Reflection | Sonnet 4.6 | 2.5 Flash | v4 Flash | GPT-4.1 | Fixed (strong model required) |
+| Generation extension | Sonnet 4.6 | 2.5 Flash | v4 Flash | GPT-4.1 | Fixed (strong model required) |
+| Synthesis | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | v4 Flash or v4 Pro | GPT-4.1 or o3 | **Standard/Premium toggle** (hidden for Gemini) |
+| Meta-agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | v4 Flash or v4 Pro | GPT-4.1 or o3 | Follows synthesis toggle |
+| Roster agent | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | v4 Flash or v4 Pro | GPT-4.1 or o3 | Follows synthesis toggle |
+| Handover document | Sonnet 4.6 or Opus 4.6 | 2.5 Flash | v4 Flash or v4 Pro | GPT-4.1 or o3 | Follows synthesis toggle |
+| Generation compression | Haiku 4.5 | **2.5 Flash Lite** | v4 Flash | **GPT-4.1 mini** | Fixed (simple summarisation) |
+| Direction attribution | Haiku 4.5 | **2.5 Flash Lite** | v4 Flash | **GPT-4.1 mini** | Fixed (closed-set classification) |
+| Mandate generation | Haiku 4.5 | **2.5 Flash Lite** | v4 Flash | **GPT-4.1 mini** | Fixed (simple drafting) |
 
 Approximate token prices per million:
 
@@ -475,10 +491,15 @@ Approximate token prices per million:
 | Sonnet 4.6 | $3.00 | $15.00 | $3.75 | $0.30 |
 | Opus 4.6 | $15.00 | $75.00 | $18.75 | $1.50 |
 | Haiku 4.5 | $1.00 | $5.00 | $1.25 | $0.10 |
+| DeepSeek v4 Flash | $0.14 | $0.28 | — | — |
+| DeepSeek v4 Pro | $0.44 | $0.87 | — | — |
+| GPT-4.1 | $2.00 | $8.00 | — | — |
+| GPT-4.1 mini | $0.40 | $1.60 | — | — |
+| o3 | $2.00 | $8.00 | — | — |
 
-Gemini 2.5 Flash Lite is used for compression and mandate-rewriting tasks — the same "cheap model for cheap tasks" principle as Haiku on the Anthropic path. All generation, debate, synthesis, meta-agent, and roster calls use Gemini 2.5 Flash.
+Gemini 2.5 Flash Lite and GPT-4.1 mini are used for compression and mandate-rewriting tasks — the same "cheap model for cheap tasks" principle as Haiku on the Anthropic path. DeepSeek does not currently have a separate cheap-tier model configured, so `v4 Flash` covers both tiers there. All generation, debate, synthesis, meta-agent, and roster calls otherwise use each provider's strong model.
 
-The **Opus toggle** (Anthropic path only) applies to synthesis, meta-agent, and roster agent calls — the three calls where reasoning quality most directly affects the session's value. On Gemini, the synthesis model section is hidden entirely; all roles use Gemini 2.5 Flash. Generation and debate remain on the strong model regardless of the toggle.
+The **Standard/Premium toggle** applies to synthesis, meta-agent, roster agent, and handover calls — the calls where reasoning quality most directly affects the session's value — and switches between each provider's standard and premium model (Anthropic: Sonnet/Opus, DeepSeek: v4 Flash/v4 Pro, OpenAI: GPT-4.1/o3). On Gemini, the toggle is hidden entirely; all roles use Gemini 2.5 Flash. Generation and debate remain on the standard model regardless of the toggle, on every provider. Prompt caching (the cache write/read columns above) is Anthropic-specific — Gemini, DeepSeek, and OpenAI calls are not cached in this app.
 
 ### Reducing or eliminating API costs
 
@@ -711,25 +732,27 @@ The live site at [dboocock.github.io/research-swarm](https://dboocock.github.io/
 
 ### API calls made during a session
 
-| Call type | Anthropic model | Gemini model | Caching (Anthropic) | Gemini parallelism |
-|---|---|---|---|---|
-| Generation (per agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
-| Debate (per responding agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
-| Reflection (per debating agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Parallel |
-| Generation extension (per debating agent) | Sonnet 4.6 | 2.5 Flash | ✅ Cached brief | Sequential within agent |
-| Generation compression — initial blocks (batched) | **Haiku 4.5** | 2.5 Flash Lite | ✅ Cached brief | — |
-| Generation compression — extension blocks (batched) | **Haiku 4.5** | 2.5 Flash Lite | ✅ Cached brief | — |
+Which model each call type uses per provider is covered in [Model selection and pricing](#model-selection-and-pricing) above; this table covers batching, caching, and parallelism instead — characteristics that vary by call type rather than by provider.
 
-On the Anthropic path, agent[0] runs alone first to write the prompt cache, then all remaining agents run in `Promise.all` reading from it. On the Gemini path, all agents fire in true parallel with no delays — prompt caching is Anthropic-specific and is not used on the Gemini path. Within each agent's reflection pipeline, Call 1 (Reflection) must complete before Call 2 (Generation extension) starts — agents run in parallel with each other, but the two calls within each agent are sequential.
-| Synthesis | Sonnet 4.6 / **Opus 4.6** | Cached brief only | ✅ Cached brief |
-| Meta-agent | Sonnet 4.6 / **Opus 4.6** | Plain string | ❌ |
-| Roster agent | Sonnet 4.6 / **Opus 4.6** | Cached brief | ✅ Cached brief |
-| Mandate generation | **Haiku 4.5** | Plain string | ❌ |
-| Mandate auto-apply correction | **Haiku 4.5** | Plain string | ❌ |
+| Call type | Batching | Caching (Anthropic only) | Parallelism |
+|---|---|---|---|
+| Generation | Per agent | ✅ Cached brief | Parallel (primer-then-parallel on Anthropic; fully parallel elsewhere) |
+| Debate | Per responding agent (batched across multiple partners) | ✅ Cached brief | Parallel |
+| Reflection | Per debating agent | ✅ Cached brief | Parallel |
+| Generation extension | Per debating agent | ✅ Cached brief | Sequential within agent (after that agent's Reflection call), parallel across agents |
+| Generation compression — initial blocks | Batched, one call for all agents needing it | ✅ Cached brief | — |
+| Generation compression — extension blocks | Batched, one call for all agents needing it | ✅ Cached brief | — |
+| Synthesis | Single call | ✅ Cached brief | — |
+| Meta-agent | Single call | ❌ Plain string | — |
+| Roster agent | Single call | ✅ Cached brief | — |
+| Mandate generation | Per request | ❌ Plain string | — |
+| Mandate auto-apply correction | Per request | ❌ Plain string | — |
+
+On the Anthropic path, agent[0] runs alone first to write the prompt cache, then all remaining agents run in `Promise.all` reading from it. On every other provider, all agents fire in true parallel with no delays — prompt caching is Anthropic-specific and isn't used elsewhere. Within each agent's reflection pipeline, Call 1 (Reflection) must complete before Call 2 (Generation extension) starts — agents run in parallel with each other, but the two calls within each agent are sequential.
 
 ### Models
 
-Generation, debate, reflection, and generation extension use `claude-sonnet-4-6` — these all require genuine reasoning. Synthesis, meta-agent, and roster agent use Sonnet by default, switchable to `claude-opus-4-6` via the sidebar toggle. Generation compression and mandate generation use `claude-haiku-4-5-20251001`. All model strings are defined in the `MODELS` constant and can be changed there.
+`MODELS` in `src/models.js` is the single source of truth, keyed by call type and then by provider — see the table in [Model selection and pricing](#model-selection-and-pricing). Generation, debate, reflection, and generation extension all require genuine reasoning and use each provider's standard model. Synthesis, meta-agent, roster agent, and handover default to the standard model, switchable to each provider's premium model via the sidebar toggle (`claude-opus-4-8` on Anthropic, `deepseek-v4-pro` on DeepSeek, `o3` on OpenAI — hidden on Gemini). Generation compression, direction attribution, and mandate generation use each provider's cheap model where one is configured.
 
 ---
 
@@ -772,9 +795,9 @@ Research Swarm applies a well-established approach — multi-agent debate among 
 
 ## AI disclosure
 
-Research Swarm is a tool that calls an AI language model API to run agents. Depending on the selected provider, all reasoning in a swarm session is performed either by Claude (`claude-sonnet-4-6` via the [Anthropic](https://www.anthropic.com) API) or by Gemini (`gemini-2.5-flash` via the [Google Gemini](https://ai.google.dev) API).
+Research Swarm is a tool that calls an AI language model API to run agents. Depending on the selected provider, all reasoning in a swarm session is performed by one of: Claude (`claude-sonnet-4-6` via the [Anthropic](https://www.anthropic.com) API), Gemini (`gemini-2.5-flash` via the [Google Gemini](https://ai.google.dev) API), DeepSeek (`deepseek-v4-flash` via the [DeepSeek](https://platform.deepseek.com) API), or OpenAI (`gpt-4.1` via the [OpenAI](https://openai.com) API).
 
-**Licensing**: Anthropic's usage policy governs what the API may be used for, but does not require attribution for software built on top of it. Using the Claude API is a commercial relationship (you pay per token) and does not create any intellectual property obligation toward Anthropic in the outputs or in derivative software. Research Swarm itself is independently licensed under MIT.
+**Licensing**: each provider's own usage policy governs what its API may be used for; none require attribution for software built on top of them. Using any of these APIs is a commercial relationship (you pay per token) and does not create any intellectual property obligation toward the provider in the outputs or in derivative software. Research Swarm itself is independently licensed under MIT.
 
 **What the AI does and does not do**: The agents in Research Swarm propose research directions, identify theoretical tensions, and synthesise outputs — but they do not verify claims against the literature, run experiments, or access the internet during a session. All outputs should be treated as starting points for human-directed research, not as authoritative conclusions. The quality of outputs depends heavily on the quality of the research brief and agent mandates you provide.
 
