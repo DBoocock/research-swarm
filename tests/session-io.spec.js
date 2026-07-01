@@ -131,3 +131,31 @@ test('JSON export round-trips through import with currentRound and debate struct
   // (shared .depth-btn class, no data-depth attribute to distinguish them).
   await expect(page.locator('.provider-btn[data-provider="anthropic"]')).toHaveClass(/active/);
 });
+
+test('Next Round panel shows retirement recommendations when there are no pairing proposals', async ({ page }) => {
+  await page.goto('/');
+
+  // renderPairingsPanel() previously gated its entire body on
+  // S.pairingProposals.length, so a round with only status-change
+  // recommendations (no pairings) fell through to the "No proposals yet"
+  // empty state — even though S.retirementProposals was fully populated.
+  const data = JSON.parse(JSON.stringify(EXPORT_DATA));
+  data.rounds[data.rounds.length - 1].pairingProposals = [];
+  data.rounds[data.rounds.length - 1].retirementProposals = [
+    { id: 'stochastic', action: 'retire', reason: 'Test retirement reason', status: 'retired', accepted: false },
+  ];
+
+  await page.setInputFiles('#import-file', {
+    name: 'test-export-retirement-only.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(data)),
+  });
+
+  await page.waitForFunction(() => window.__rs.S.currentRound === 3, { timeout: 5000 });
+
+  const pairingProposals = await page.evaluate(() => window.__rs.S.pairingProposals);
+  expect(pairingProposals).toEqual([]);
+
+  await expect(page.locator('#panel-pair')).not.toContainText('No proposals yet');
+  await expect(page.locator('#panel-pair')).toContainText('Test retirement reason');
+});
