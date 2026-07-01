@@ -11,6 +11,9 @@ export function setProvider(p) {
   // Synthesis-model picker only applies to multi-tier providers (not Gemini)
   const synthSection = document.getElementById('synth-model-section');
   if (synthSection) synthSection.style.display = p === 'gemini' ? 'none' : '';
+  // DeepSeek reasoning toggle only applies to the DeepSeek provider
+  const dsThinkSection = document.getElementById('deepseek-thinking-section');
+  if (dsThinkSection) dsThinkSection.style.display = p === 'deepseek' ? '' : 'none';
   if (!S.currentRound) {
     const hints = {
       gemini:    'Ready. Add a Gemini API key to begin.',

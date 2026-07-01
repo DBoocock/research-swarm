@@ -215,6 +215,9 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
         if (el) el.innerHTML = S.currentSynthesis + '<span class="cursor"></span>';
       },
     });
+    if (!/CONVERGENCES/i.test(result) || !/MOST TRACTABLE FIRST STEP/i.test(result)) {
+      throw new Error('Synthesis output is incomplete — missing required sections (likely ran out of token budget before finishing). Retry synthesis.');
+    }
     S.currentSynthesis = result;
     const el = document.getElementById('syn-body');
     if (el) el.innerHTML = result;
