@@ -1,5 +1,52 @@
 # Changelog
 
+## v4.10.0
+
+### Multi-provider architecture: Anthropic, Gemini, DeepSeek, OpenAI
+
+#### Refactor
+
+The single-file app is now built from a modular `src/` tree (`src/main.js` entry point; `providers/`, `rounds/`, `ui/`, `parse/` subdirectories) via Vite, with `vite-plugin-singlefile` inlining everything back into a single self-contained `dist/index.html` for distribution — the same offline-shareable, no-server experience as before, just built rather than hand-maintained as one file. The raw `fetch()`-based provider layer is replaced by the Vercel AI SDK's `streamText()`, unified behind `streamAI()` in `src/api.js`, with Gemini, DeepSeek, and OpenAI now available alongside Anthropic. `callParallel()`'s primer-then-parallel behaviour (Anthropic only, for prompt caching) is unchanged; other providers fire fully in parallel as before. A Playwright test suite (`tests/`), GitHub Actions CI (`ci.yml`), an automated Pages deploy (`deploy-pages.yml`), and a monthly scheduled check for deprecated model IDs (`model-deprecation-check.yml`, opens a tracking issue rather than changing anything automatically — see below) are new.
+
+Extensive live testing against real Gemini sessions during this refactor's review surfaced a long list of real regressions and pre-existing gaps, detailed below. None of the content-quality issues found (occasional repeated or truncated agent output — tracked in issue #30) turned out to be introduced by this refactor; confirmed by diffing the relevant logic directly against `main`'s pre-refactor implementation, both are pre-existing behaviours that simply hadn't been exercised this thoroughly before.
+
+#### Cost accounting
+
+Four independent bugs, each masking or compounding the others:
+
+- `addUsage()` multiplied token counts directly by `PRICING`'s $-per-million rates with no `/1e6`, inflating every cost figure by roughly 1,000,000×.
+- `streamAI()` passed `maxTokens` to `streamText()`, a parameter name the AI SDK doesn't recognize (it wants `maxOutputTokens`) — silently dropped, meaning every per-role token budget in `MAX_TOKENS` and every `maxTokensOverride` went unenforced app-wide until fixed.
+- `priceFor()` falls back to `claude-sonnet-4-6`'s rate on any lookup miss, with no error — so drift between `modelFor()`'s model IDs and the generated `PRICING` table silently mis-billed calls instead of failing loudly. Found: Gemini and DeepSeek were priced at Anthropic Sonnet rates (bare vs. LiteLLM-prefixed key mismatch), `o3` (OpenAI's premium tier) was missing from the pricing generator entirely, and the Anthropic premium tier pointed at a stale `claude-opus-4-6` instead of the current `claude-opus-4-8`. A second pass found Gemini's pricing was additionally being fetched from the wrong LiteLLM *hosting route* — bare keys resolve to Vertex AI pricing, `gemini/`-prefixed keys resolve to the direct API this app actually calls; both happened to have identical rates at the time, but only one is the technically correct source. `tests/pricing-keys.spec.js` now asserts every model `modelFor()` can return has an exact `PRICING` entry, across every provider and both synthesis-tier settings — it caught the `o3` gap the moment it was written.
+- The "saved via caching" cost figure was hardcoded to `$0` for every non-Anthropic provider, even though Gemini's real cache-read token counts (`cachedContentTokenCount`, surfaced via `@ai-sdk/google` → the AI SDK's `usage.inputTokenDetails.cacheReadTokens`) were already being priced correctly in the cost *total* — the separate "saved" stat just never credited it. The existing Anthropic-specific formula generalizes cleanly to every provider (cache reads/writes are always 0 for providers without caching, so it collapses to zero savings for them automatically) — no per-provider branch needed.
+
+#### Discontinued Gemini model, silent attribution failures
+
+`gemini-2.5-flash-lite-preview-06-17` (hardcoded for the compression, attribution, and mandate roles) turned out to have a `deprecation_date` of 2025-11-18 in LiteLLM's catalog — over seven months before it was noticed failing in production. `compressGenerationOutputs()` has no try/catch of its own, so its failure crashed every post-debate synthesis outright. `runAttribution()` *does* have its own try/catch, which silently swallowed the identical failure via `console.warn` — every `researchMap` entry across two full live test sessions had empty `agents`/`debateRefs` with zero visible error, because attribution had never once succeeded. Swapped all three roles to the stable `gemini-2.5-flash-lite` (identical input/output pricing to the preview, no cost impact), and made attribution failures visible in the synthesis panel instead of silent — it still doesn't block synthesis (losing a whole round over non-critical attribution metadata would be worse), but a future model-level failure will no longer hide behind an unlogged warning.
+
+A monthly scheduled workflow (`model-deprecation-check.yml`) now checks every configured model's `deprecation_date` against LiteLLM's catalog and opens or updates a tracking issue when one is within 60 days of (or past) deprecation. Deliberately detection-only: LiteLLM doesn't provide a structured "use this instead" field, so picking the actual replacement remains a deliberate human decision, not something safe to automate — the same pattern Dependabot/Renovate use for the equivalent dependency-update problem.
+
+#### Import/export reconstruction
+
+`rebuildDebatePanel()` and `rebuildSynthesisPanel()` — both exclusively reachable via session import, never exercised by any live code path — turned out to be broken in ways no test caught, because the existing round-trip test only asserted on internal state, never the rendered DOM. `rebuildDebatePanel()` targeted a nonexistent element ID (`#panel-debate` vs. the real `#panel-deb`) and read a field that doesn't exist (`S.debates` vs. the real `S.currentDebates`, in a completely different shape), throwing immediately on any import with debate data and aborting everything queued after it in `importSession()`. `rebuildSynthesisPanel()` had its own wrong ID (`#panel-synth` vs. `#panel-syn`) and was only ever called with a hardcoded `null` instead of the last round's actual synthesis text, so it would never have shown anything regardless. Both now match their live-rendering counterparts, and `session-io.spec.js` gained DOM-level assertions (panel text content, provider button active state) so "state restored correctly but never rendered" can't silently regress again.
+
+Separately: `setDepth()` toggled the active CSS class on every `.depth-btn` element — a class shared with the provider and synth-model buttons, which have no `data-depth` attribute — silently stripping "active" from whichever provider button had just been correctly set, on both page load and import. And `renderPairingsPanel()` gated its entire body on `S.pairingProposals.length`, so a round where the meta-agent proposed only retirement/status recommendations (no debate pairings) fell through to the "No proposals yet" empty state, discarding real, already-computed retirement data.
+
+#### Synthesis-failure session integrity
+
+Forensic analysis of a real exported session (a "round 2" log entry that turned out to contain round-3-labelled research directions) traced back to a genuine session-log corruption bug: `parseSynthesis()` labels new research-map entries using `S.currentRound` (the live debate-round counter), while `saveRound()`'s log entry uses an independent `seqNum` (`S.rounds.length + 1`), originally added to avoid a different label collision. The two silently diverge whenever a synthesis fails and the user launches another debate round instead of retrying — `currentRound` keeps advancing while `seqNum` doesn't, and a later successful synthesis gets saved under the wrong round number with mismatched debate content.
+
+`runDebate()` now refuses to start while a synthesis failure is unresolved (`S._pendingSynthesisArgs` set), and the Next Round panel disables "launch debate round" with an explanatory notice under the same condition. Because a failed synthesis's debate content, the pairing proposals that led to it, `S._pendingSynthesisArgs`, and its error message were previously only ever persisted via `saveRound()` (success-only), exporting a failed-but-unresolved session looked identical to a fresh one with nothing pending — discarding exactly the information needed to retry it. All of the above are now captured unconditionally in `buildExportData()` and restored on import, reusing the same `S._pendingSynthesisArgs`-driven rendering and blocking logic already built for the live-failure case rather than any parallel "import retry" path. `renderSynthesisFailure()` is now a single shared renderer for the error-plus-retry-button UI, used by both the live failure path and the import-reconstruction path.
+
+#### UI
+
+The synthesis-tier model toggle is relabelled from Anthropic-specific "sonnet"/"opus" to provider-agnostic "standard"/"premium" — it already applied to DeepSeek (`deepseek-v4-pro`) and OpenAI (`o3`) in addition to Anthropic, but the labels were Anthropic model names.
+
+#### Not addressed here
+
+Issue #30 (occasional repeated or truncated agent generation output on the Gemini path) remains open. Two live sessions surfaced two different symptoms — near-byte-identical repeated content across rounds, and a single agent's output truncating mid-word with no error — and neither has a confirmed root cause. Ruled out: verbose preamble consuming the output budget (checked directly; comparable in length to successfully-completing agents in the same round) and any parsing/stripping on this app's side (generation output is stored completely unparsed). Two candidate explanations remain undistinguished — hidden reasoning tokens consuming the budget despite `thinkingConfig: { thinkingBudget: 0 }`, versus a mundane stream-level disruption unrelated to any token budget — pending capturing `finishReason` from the AI SDK's `streamText()` result (confirmed available, not currently read anywhere in this app), which is the one piece of data that would actually tell them apart.
+
+---
+
 ## v4.9.2
 
 ### Session import: full panel and state reconstruction (issue #4)
