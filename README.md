@@ -199,7 +199,7 @@ The interface is divided into a **sidebar** (always visible) and a **main panel*
 | **Provider** | Gemini (default) or Anthropic — radio selector + key field |
 | **Session cost** | Live cost tracker with cache hit rate |
 | **Agents** | Agent list with status, edit, and delete controls |
-| **Synthesis model** | Sonnet / Opus toggle (Anthropic only) |
+| **Synthesis model** | Standard / Premium toggle (hidden for Gemini) |
 | **Depth** | Brief (default) / Detailed / Exhaustive output length |
 | **Reflection round** | Enable / disable the two-call reflection pipeline after each debate round |
 | **Run button** | Launches the generation round |
