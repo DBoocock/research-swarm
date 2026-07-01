@@ -2,7 +2,7 @@ import { S, agents } from '../state.js';
 import { MAX_TOKENS } from '../constants.js';
 import { streamAI, briefOnlyBlock } from '../api.js';
 import { buildMapBlock, flatGen, flatCompressed } from '../utils.js';
-import { makeRoundHdr, mkBtn } from '../ui/helpers.js';
+import { makeRoundHdr, mkBtn, makeNotice } from '../ui/helpers.js';
 import { switchTab, tc, setStatus } from '../ui/tabs.js';
 import { parseSynthesis } from '../parse/synthesis.js';
 import { saveRound, autoExportJson, autoExportMd } from '../parse/session.js';
@@ -223,7 +223,10 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     tc('syn', 1);
     setStatus('Synthesis complete. Running meta-agent...');
     const { newEntries, reusedEntries } = parseSynthesis(result);
-    await runAttribution([...newEntries, ...reusedEntries]);
+    const attributionOk = await runAttribution([...newEntries, ...reusedEntries]);
+    if (!attributionOk) {
+      panel.appendChild(makeNotice('Attribution call failed this round — new research map entries have no agent/debate attribution. Synthesis itself succeeded; this does not block the session.'));
+    }
     await runMeta(result);
     saveRound(includeDebate);
     S._pendingSynthesisArgs = null;

@@ -10,9 +10,9 @@ export const MODELS = {
   meta:         { anthropic:'claude-sonnet-4-6',    gemini:'gemini-2.5-flash',            deepseek:'deepseek-v4-flash', openai:'gpt-4.1'      },
   roster:       { anthropic:'claude-sonnet-4-6',    gemini:'gemini-2.5-flash',            deepseek:'deepseek-v4-flash', openai:'gpt-4.1'      },
   handover:     { anthropic:'claude-sonnet-4-6',    gemini:'gemini-2.5-flash',            deepseek:'deepseek-v4-flash', openai:'gpt-4.1'      },
-  attribution:  { anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite-preview-06-17', deepseek:'deepseek-v4-flash', openai:'gpt-4.1-mini' },
-  compression:  { anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite-preview-06-17', deepseek:'deepseek-v4-flash', openai:'gpt-4.1-mini' },
-  mandate:      { anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite-preview-06-17', deepseek:'deepseek-v4-flash', openai:'gpt-4.1-mini' },
+  attribution:  { anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite', deepseek:'deepseek-v4-flash', openai:'gpt-4.1-mini' },
+  compression:  { anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite', deepseek:'deepseek-v4-flash', openai:'gpt-4.1-mini' },
+  mandate:      { anthropic:'claude-haiku-4-5-20251001', gemini:'gemini-2.5-flash-lite', deepseek:'deepseek-v4-flash', openai:'gpt-4.1-mini' },
 };
 
 const SYNTHESIS_TIER = new Set(['synthesis', 'meta', 'roster', 'handover']);

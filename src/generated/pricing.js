@@ -4,7 +4,7 @@ export const PRICING = {
   "claude-opus-4-8": { inp: 5, out: 25, cw: 6.25, cr: 0.5 },
   "claude-haiku-4-5-20251001": { inp: 1, out: 5, cw: 1.25, cr: 0.09999999999999999 },
   "gemini-2.5-flash": { inp: 0.3, out: 2.5, cw: 0, cr: 0.03 },
-  "gemini-2.5-flash-lite-preview-06-17": { inp: 0.09999999999999999, out: 0.39999999999999997, cw: 0, cr: 0.024999999999999998 },
+  "gemini-2.5-flash-lite": { inp: 0.09999999999999999, out: 0.39999999999999997, cw: 0, cr: 0.01 },
   "deepseek-v4-flash": { inp: 0.14, out: 0.28, cw: 0, cr: 0.0028 },
   "deepseek-v4-pro": { inp: 0.435, out: 0.87, cw: 0, cr: 0.003625 },
   "gpt-4.1": { inp: 2, out: 8, cw: 0, cr: 0.5 },

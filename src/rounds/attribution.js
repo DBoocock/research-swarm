@@ -3,10 +3,10 @@ import { streamAI, buildCachedBlock } from '../api.js';
 import { unionBy } from '../utils.js';
 
 export async function runAttribution(newDirections) {
-  if (!newDirections.length) return;
+  if (!newDirections.length) return true;
 
   const activeAgents = agents.filter(a => S.agentStatuses[a.id] !== 'retired' && S.genBlocks[a.id]);
-  if (!activeAgents.length) return;
+  if (!activeAgents.length) return true;
 
   const debatePairs = Object.keys(S.currentDebates).map(key => {
     const [id1, id2] = key.split('_');
@@ -72,7 +72,9 @@ Use an empty list [] where nothing contributed. Output only these lines — no e
           .map(k => ({ round: S.currentRound, key: k })),
       ];
     }
+    return true;
   } catch (e) {
     console.warn('Attribution call failed:', e.message);
+    return false;
   }
 }
