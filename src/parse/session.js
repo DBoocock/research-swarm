@@ -39,6 +39,16 @@ export function buildExportData() {
     agentReflections: S.agentReflections,
     genBlocks: S.genBlocks,
     compressedGen: S.compressedGen,
+    // Captured unconditionally (not just on synthesis success) so a failed
+    // synthesis attempt's debate content, the pairings that led to it, and
+    // its error state all survive export — re-importing puts the session
+    // back in the exact pre-failure state, ready to retry, rather than
+    // losing the round that never saved.
+    currentDebates: { ...S.currentDebates },
+    pairingProposals: [...S.pairingProposals],
+    retirementProposals: [...S.retirementProposals],
+    pendingSynthesisArgs: S._pendingSynthesisArgs,
+    lastSynthesisError: S.lastSynthesisError,
   };
 }
 
@@ -227,9 +237,14 @@ export function importSession(event) {
       }
       S.currentRound = data.currentRound;
       const lastRound = data.rounds && data.rounds.length ? data.rounds[data.rounds.length - 1] : null;
-      S.pairingProposals     = lastRound ? [...(lastRound.pairingProposals || [])] : [];
-      S.retirementProposals  = lastRound ? [...(lastRound.retirementProposals || [])] : [];
-      S.currentDebates       = lastRound ? { ...lastRound.debates } : {};
+      // Prefer the unconditionally-captured fields (cover a failed, unsaved
+      // round) — older exports without them fall back to the last
+      // successfully saved round's values, as before.
+      S.pairingProposals     = data.pairingProposals    || (lastRound ? [...(lastRound.pairingProposals || [])] : []);
+      S.retirementProposals  = data.retirementProposals || (lastRound ? [...(lastRound.retirementProposals || [])] : []);
+      S.currentDebates       = data.currentDebates ? { ...data.currentDebates } : (lastRound ? { ...lastRound.debates } : {});
+      S._pendingSynthesisArgs = data.pendingSynthesisArgs || null;
+      S.lastSynthesisError    = data.lastSynthesisError || null;
       S.cumulativeCostBaseline = data.cumulativeCost || 0;
       Object.assign(costS, { inp: 0, out: 0, cr: 0, cw: 0, total: 0, saved: 0, calls: [] });
       renderCost();
@@ -250,8 +265,8 @@ export function importSession(event) {
       const genRounds    = Object.values(S.genBlocks).map(b => b.initial.round);
       const lastGenRound = genRounds.length ? Math.max(...genRounds) : 0;
       tc('gen', genRounds.filter(r => r === lastGenRound).length);
-      tc('deb', lastRound ? Object.keys(lastRound.debates || {}).length : 0);
-      tc('syn', S.rounds.length ? 1 : 0);
+      tc('deb', Object.keys(S.currentDebates).length);
+      tc('syn', (S.rounds.length || S._pendingSynthesisArgs) ? 1 : 0);
       setStatus(`Session imported: ${S.rounds.length} round${S.rounds.length !== 1 ? 's' : ''} restored. API key required to continue.`);
       switchTab('log');
     } catch (err) {

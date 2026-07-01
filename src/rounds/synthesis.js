@@ -2,13 +2,14 @@ import { S, agents } from '../state.js';
 import { MAX_TOKENS } from '../constants.js';
 import { streamAI, briefOnlyBlock } from '../api.js';
 import { buildMapBlock, flatGen, flatCompressed } from '../utils.js';
-import { makeRoundHdr, mkBtn, makeNotice } from '../ui/helpers.js';
+import { makeRoundHdr, makeNotice } from '../ui/helpers.js';
 import { switchTab, tc, setStatus } from '../ui/tabs.js';
 import { parseSynthesis } from '../parse/synthesis.js';
 import { saveRound, autoExportJson, autoExportMd } from '../parse/session.js';
 import { runAttribution } from './attribution.js';
 import { runMeta } from './meta.js';
 import { renderPairingsPanel } from '../ui/panels/pairings.js';
+import { renderSynthesisFailure } from '../ui/panels/synthesis.js';
 
 export async function compressGenerationOutputs() {
   const entries = Object.entries(S.genBlocks).filter(([id]) => S.agentStatuses[id] !== 'retired');
@@ -231,23 +232,13 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     await runMeta(result);
     saveRound(includeDebate);
     S._pendingSynthesisArgs = null;
+    S.lastSynthesisError = null;
     autoExportJson();
     autoExportMd();
   } catch (e) {
     if (e.name === 'AbortError') return;
-    const synBody = document.getElementById('syn-body');
-    if (synBody) {
-      synBody.innerHTML = '';
-      const errMsg = document.createElement('span');
-      errMsg.style.color = 'var(--danger)';
-      errMsg.textContent = `Synthesis error: ${e.message}`;
-      synBody.appendChild(errMsg);
-      synBody.appendChild(mkBtn('retry synthesis →', 'sm-btn', retrySynthesis, 'display:block;margin-top:10px;'));
-    }
-    const badge = sc.querySelector('.badge');
-    if (badge) { badge.className = 'badge b-err'; badge.textContent = 'error'; }
-    const s = hdr.querySelector('#rh-s');
-    if (s) { s.className = 'round-status rs-error'; s.textContent = 'error'; }
+    S.lastSynthesisError = e.message;
+    renderSynthesisFailure(panel, e.message);
     setStatus('Synthesis error: ' + e.message + ' — click "retry synthesis" in the synthesis panel to try again.');
     // Re-render so the Next Round tab picks up S._pendingSynthesisArgs and
     // disables "launch debate round" — otherwise a stale, still-enabled

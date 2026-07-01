@@ -36,6 +36,7 @@ export const S = {
   agentReflections: {},
   reflectionsEnabled: true,
   _pendingSynthesisArgs: null,
+  lastSynthesisError: null,
 };
 
 export const costS = { inp: 0, out: 0, cw: 0, cr: 0, total: 0, saved: 0, callCount: 0, calls: [] };
