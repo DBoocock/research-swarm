@@ -4,6 +4,8 @@
 
 import { S, agents, brief, costS, genCardEls } from './state.js';
 import { PROVIDERS, COLOURS } from './constants.js';
+import { modelFor, MODELS } from './models.js';
+import { PRICING } from './pricing.js';
 
 // UI layers
 import { renderAgentList, toggleAgent, selectAll, selectNone, openAgentModal, openNewAgentModal, closeAgentModal, saveAgent, deleteCurrentAgent, deleteAgent, generateMandate, buildColorGrid } from './ui/agents.js';
@@ -141,4 +143,4 @@ document.title = brief.title;
 
 // ── Test hooks (benign in production) ──────────────────────
 window.__rs   = { S, agents, brief, costS, genCardEls };
-window.__test = { runGen, runDebate, runSynthesis, runReflectionRound, parseSynthesis, buildExportData };
+window.__test = { runGen, runDebate, runSynthesis, runReflectionRound, parseSynthesis, buildExportData, modelFor, MODELS, PRICING };

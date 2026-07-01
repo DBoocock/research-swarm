@@ -21,7 +21,7 @@ export function modelFor(role) {
   const p = S.provider || 'gemini';
   const row = MODELS[role] || MODELS.generation;
   if (SYNTHESIS_TIER.has(role) && S.synthesisModel === 'opus') {
-    if (p === 'anthropic') return 'claude-opus-4-6';
+    if (p === 'anthropic') return 'claude-opus-4-8';
     if (p === 'deepseek')  return 'deepseek-v4-pro';
     if (p === 'openai')    return 'o3';
   }

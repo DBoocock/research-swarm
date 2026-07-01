@@ -10,32 +10,39 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, '../src/generated/pricing.js');
 
-// Models we price, keyed by model ID used in src/models.js
+// Models we price. Every ID here must be the EXACT string modelFor() in
+// src/models.js can return — these strings are used as both the LiteLLM
+// lookup key and the PRICING storage key, so priceFor() finds them with a
+// plain object lookup. LiteLLM publishes bare (non-prefixed) entries for
+// Gemini/DeepSeek with identical pricing to their provider-prefixed
+// counterparts, so no separate mapping is needed. Keep this list in sync
+// with src/models.js's MODELS table and SYNTHESIS_TIER premium mappings —
+// see tests/pricing-keys.spec.js, which fails if they drift apart.
 const MODELS_TO_PRICE = [
   'claude-sonnet-4-6',
   'claude-opus-4-8',
   'claude-haiku-4-5-20251001',
-  'gemini/gemini-2.5-flash',
-  'gemini/gemini-2.5-flash-lite-preview-06-17',
-  'gemini/gemini-2.5-pro',
-  'deepseek/deepseek-v4-flash',
-  'deepseek/deepseek-v4',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite-preview-06-17',
+  'deepseek-v4-flash',
+  'deepseek-v4-pro',
   'gpt-4.1',
   'gpt-4.1-mini',
+  'o3',
 ];
 
 // Fallback pricing (per-million-token, in USD) used when LiteLLM is unreachable
 const FALLBACK = {
-  'claude-sonnet-4-6':                      { inp: 3.00, out: 15.00, cw: 3.75, cr: 0.30 },
-  'claude-opus-4-8':                        { inp: 15.00, out: 75.00, cw: 18.75, cr: 1.50 },
-  'claude-haiku-4-5-20251001':              { inp: 0.80, out: 4.00, cw: 1.00, cr: 0.08 },
-  'gemini/gemini-2.5-flash':               { inp: 0.15, out: 0.60, cw: 0, cr: 0 },
-  'gemini/gemini-2.5-flash-lite-preview-06-17': { inp: 0.075, out: 0.30, cw: 0, cr: 0 },
-  'gemini/gemini-2.5-pro':                 { inp: 1.25, out: 10.00, cw: 0, cr: 0 },
-  'deepseek/deepseek-v4-flash':            { inp: 0.27, out: 1.10, cw: 0, cr: 0 },
-  'deepseek/deepseek-v4':                  { inp: 0.27, out: 1.10, cw: 0, cr: 0 },
-  'gpt-4.1':                               { inp: 2.00, out: 8.00, cw: 0, cr: 0 },
-  'gpt-4.1-mini':                          { inp: 0.40, out: 1.60, cw: 0, cr: 0 },
+  'claude-sonnet-4-6':                   { inp: 3.00, out: 15.00, cw: 3.75, cr: 0.30 },
+  'claude-opus-4-8':                     { inp: 5.00, out: 25.00, cw: 6.25, cr: 0.50 },
+  'claude-haiku-4-5-20251001':           { inp: 1.00, out: 5.00, cw: 1.25, cr: 0.10 },
+  'gemini-2.5-flash':                    { inp: 0.30, out: 2.50, cw: 0, cr: 0.03 },
+  'gemini-2.5-flash-lite-preview-06-17': { inp: 0.10, out: 0.40, cw: 0, cr: 0.025 },
+  'deepseek-v4-flash':                   { inp: 0.14, out: 0.28, cw: 0, cr: 0.0028 },
+  'deepseek-v4-pro':                     { inp: 0.435, out: 0.87, cw: 0, cr: 0.003625 },
+  'gpt-4.1':                             { inp: 2.00, out: 8.00, cw: 0, cr: 0.50 },
+  'gpt-4.1-mini':                        { inp: 0.40, out: 1.60, cw: 0, cr: 0.10 },
+  'o3':                                  { inp: 2.00, out: 8.00, cw: 0, cr: 0.50 },
 };
 
 async function fetchPricing() {
