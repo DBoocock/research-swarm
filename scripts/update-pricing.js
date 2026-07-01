@@ -6,51 +6,13 @@
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { MODELS_TO_PRICE, FALLBACK, fetchLiteLLMData, findDeprecations } from './model-config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, '../src/generated/pricing.js');
 
-// Models we price. Every ID here must be the EXACT string modelFor() in
-// src/models.js can return — these strings are used as both the LiteLLM
-// lookup key and the PRICING storage key, so priceFor() finds them with a
-// plain object lookup. LiteLLM publishes bare (non-prefixed) entries for
-// Gemini/DeepSeek with identical pricing to their provider-prefixed
-// counterparts, so no separate mapping is needed. Keep this list in sync
-// with src/models.js's MODELS table and SYNTHESIS_TIER premium mappings —
-// see tests/pricing-keys.spec.js, which fails if they drift apart.
-const MODELS_TO_PRICE = [
-  'claude-sonnet-4-6',
-  'claude-opus-4-8',
-  'claude-haiku-4-5-20251001',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'deepseek-v4-flash',
-  'deepseek-v4-pro',
-  'gpt-4.1',
-  'gpt-4.1-mini',
-  'o3',
-];
-
-// Fallback pricing (per-million-token, in USD) used when LiteLLM is unreachable
-const FALLBACK = {
-  'claude-sonnet-4-6':                   { inp: 3.00, out: 15.00, cw: 3.75, cr: 0.30 },
-  'claude-opus-4-8':                     { inp: 5.00, out: 25.00, cw: 6.25, cr: 0.50 },
-  'claude-haiku-4-5-20251001':           { inp: 1.00, out: 5.00, cw: 1.25, cr: 0.10 },
-  'gemini-2.5-flash':                    { inp: 0.30, out: 2.50, cw: 0, cr: 0.03 },
-  'gemini-2.5-flash-lite': { inp: 0.10, out: 0.40, cw: 0, cr: 0.01 },
-  'deepseek-v4-flash':                   { inp: 0.14, out: 0.28, cw: 0, cr: 0.0028 },
-  'deepseek-v4-pro':                     { inp: 0.435, out: 0.87, cw: 0, cr: 0.003625 },
-  'gpt-4.1':                             { inp: 2.00, out: 8.00, cw: 0, cr: 0.50 },
-  'gpt-4.1-mini':                        { inp: 0.40, out: 1.60, cw: 0, cr: 0.10 },
-  'o3':                                  { inp: 2.00, out: 8.00, cw: 0, cr: 0.50 },
-};
-
-async function fetchPricing() {
-  const url = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
-  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
+const REPO = 'DBoocock/research-swarm';
+const DEPRECATION_CHECK_WORKFLOW = 'model-deprecation-check.yml';
 
 function perM(v) {
   // LiteLLM values are per-token — multiply by 1e6 for per-million
@@ -59,10 +21,10 @@ function perM(v) {
 
 function extractPricing(data) {
   const result = { ...FALLBACK };
-  for (const model of MODELS_TO_PRICE) {
-    const entry = data[model];
+  for (const { id, litellmKey } of MODELS_TO_PRICE) {
+    const entry = data[litellmKey];
     if (!entry) continue;
-    result[model] = {
+    result[id] = {
       inp: perM(entry.input_cost_per_token),
       out: perM(entry.output_cost_per_token),
       cw:  perM(entry.cache_creation_input_token_cost ?? 0),
@@ -72,15 +34,53 @@ function extractPricing(data) {
   return result;
 }
 
+function warnDeprecations(data) {
+  const findings = findDeprecations(data);
+  if (!findings.length) return;
+  console.warn('\nupdate-pricing: model deprecation warning(s):');
+  for (const f of findings) {
+    const when = f.daysUntil < 0 ? `${-f.daysUntil} days ago` : `in ${f.daysUntil} days`;
+    console.warn(`  - ${f.id} (${f.litellmKey}): deprecates ${f.deprecationDate} (${when})${f.source ? ` — ${f.source}` : ''}`);
+  }
+  console.warn('  See scripts/check-model-deprecation.js / the monthly model-deprecation-check workflow for tracking.\n');
+}
+
+// Non-fatal: warns if the scheduled deprecation-check workflow has been
+// disabled (GitHub auto-disables scheduled workflows after 60 days with no
+// repository activity) — the one failure mode that check can't detect on
+// its own, since a disabled workflow never runs to report anything.
+async function warnIfDeprecationCheckDisabled() {
+  try {
+    const headers = { Accept: 'application/vnd.github+json' };
+    if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    const res = await fetch(
+      `https://api.github.com/repos/${REPO}/actions/workflows/${DEPRECATION_CHECK_WORKFLOW}`,
+      { headers, signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return; // workflow not found yet, rate-limited, etc. — not worth failing the build over
+    const workflow = await res.json();
+    if (workflow.state !== 'active') {
+      console.warn(`\nupdate-pricing: the ${DEPRECATION_CHECK_WORKFLOW} scheduled workflow is "${workflow.state}", not active.`);
+      console.warn('  GitHub disables scheduled workflows after 60 days with no repository activity —');
+      console.warn('  re-enable it from the Actions tab if this is unexpected.\n');
+    }
+  } catch {
+    // Network hiccup or offline build — same "don't fail the build" policy as the pricing fetch itself.
+  }
+}
+
 async function main() {
   let pricing = FALLBACK;
   try {
-    const data = await fetchPricing();
+    const data = await fetchLiteLLMData();
     pricing = extractPricing(data);
     console.log('update-pricing: fetched live pricing from LiteLLM');
+    warnDeprecations(data);
   } catch (e) {
     console.warn('update-pricing: using fallback pricing (' + e.message + ')');
   }
+
+  await warnIfDeprecationCheckDisabled();
 
   mkdirSync(join(__dirname, '../src/generated'), { recursive: true });
   const lines = Object.entries(pricing).map(
