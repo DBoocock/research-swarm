@@ -77,11 +77,14 @@ export function renderPairingsPanel() {
 
   panel.appendChild(wrap);
   if (S.pairingProposals.length) {
+    if (S._pendingSynthesisArgs) {
+      panel.appendChild(makeNotice('A previous synthesis failed and hasn\'t been retried yet — resolve it (Synthesis tab → retry) before launching another debate round.'));
+    }
     const launchBtn = document.createElement('button');
     launchBtn.className = 'launch-btn';
     launchBtn.textContent = 'launch debate round →';
     launchBtn.addEventListener('click', () => _runDebate?.());
-    if (S.running) launchBtn.disabled = true;
+    if (S.running || S._pendingSynthesisArgs) launchBtn.disabled = true;
     panel.appendChild(launchBtn);
   }
   tc('pair', S.pairingProposals.filter(p => p.enabled).length);

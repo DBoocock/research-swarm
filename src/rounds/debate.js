@@ -26,6 +26,7 @@ function buildPairHistory(criticId, partnerId, partnerName) {
 
 export async function runDebate() {
   if (S.running) return;
+  if (S._pendingSynthesisArgs) { setStatus('Resolve the failed synthesis (retry it) before launching another debate round.'); return; }
   const activePairs = S.pairingProposals.filter(p => p.enabled);
   if (!activePairs.length) { setStatus('No pairs enabled.'); return; }
   S.running = true; lockTabs(); S.currentDebates = {};

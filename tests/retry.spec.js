@@ -90,3 +90,50 @@ test('retry button appears after synthesis failure and succeeds on click', async
   const clearedArgs = await page.evaluate(() => window.__rs.S._pendingSynthesisArgs);
   expect(clearedArgs).toBeNull();
 });
+
+test('launching another debate round is blocked while a synthesis failure is unresolved', async ({ page }) => {
+  await page.route('**/api.anthropic.com/**', async route => {
+    const body = route.request().postDataJSON();
+    const role = inferRole(body);
+    if (role === 'synthesis') {
+      await route.fulfill({ status: 500, contentType: 'text/plain', body: 'Server error' });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' },
+      body: sseWrap(FIXTURES.generation),
+    });
+  });
+
+  await page.goto('/');
+  await switchToAnthropic(page);
+  await injectGenState(page);
+  await page.evaluate(() => {
+    window.__rs.S.researchMap = [];
+    window.__rs.S.currentRound = 1;
+    // Stale pairing proposal left over from the last successful meta-agent
+    // run — this is what a second debate round would incorrectly launch
+    // against if the failed synthesis in between weren't blocking it.
+    window.__rs.S.pairingProposals = [
+      { id1: 'stochastic', id2: 'nonequil', type: 'BRIDGE', reason: 'test', enabled: true },
+    ];
+  });
+
+  await page.evaluate(async () => {
+    try { await window.__test.runSynthesis(false); } catch { /* expected */ }
+  });
+
+  await expect(page.locator('#panel-syn .sm-btn').filter({ hasText: 'retry synthesis' })).toBeVisible({ timeout: 10000 });
+
+  const launchBtn = page.locator('#panel-pair .launch-btn');
+  await expect(launchBtn).toBeDisabled();
+  await expect(page.locator('#panel-pair')).toContainText('resolve it');
+
+  // Defense in depth: runDebate() itself must refuse even if something
+  // else tried to call it directly, not just the disabled button.
+  const roundBefore = await page.evaluate(() => window.__rs.S.currentRound);
+  await page.evaluate(async () => { await window.__test.runDebate(); });
+  const roundAfter = await page.evaluate(() => window.__rs.S.currentRound);
+  expect(roundAfter).toBe(roundBefore);
+});

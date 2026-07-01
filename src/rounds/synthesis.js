@@ -8,6 +8,7 @@ import { parseSynthesis } from '../parse/synthesis.js';
 import { saveRound, autoExportJson, autoExportMd } from '../parse/session.js';
 import { runAttribution } from './attribution.js';
 import { runMeta } from './meta.js';
+import { renderPairingsPanel } from '../ui/panels/pairings.js';
 
 export async function compressGenerationOutputs() {
   const entries = Object.entries(S.genBlocks).filter(([id]) => S.agentStatuses[id] !== 'retired');
@@ -248,6 +249,10 @@ AGENT1 vs AGENT2: [claim A in ≤15 words] | [claim B in ≤15 words] | Resoluti
     const s = hdr.querySelector('#rh-s');
     if (s) { s.className = 'round-status rs-error'; s.textContent = 'error'; }
     setStatus('Synthesis error: ' + e.message + ' — click "retry synthesis" in the synthesis panel to try again.');
+    // Re-render so the Next Round tab picks up S._pendingSynthesisArgs and
+    // disables "launch debate round" — otherwise a stale, still-enabled
+    // button from the prior round lets debate proceed on unresolved state.
+    renderPairingsPanel();
   }
 }
 
