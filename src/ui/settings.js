@@ -28,7 +28,10 @@ export function setProvider(p) {
 
 export function setDepth(d) {
   S.depth = d;
-  document.querySelectorAll('.depth-btn').forEach(b => {
+  // Scoped to [data-depth] — .depth-btn is shared with provider and
+  // synth-model buttons, which have no data-depth attribute and would
+  // otherwise have 'active' silently stripped by this same toggle.
+  document.querySelectorAll('.depth-btn[data-depth]').forEach(b => {
     b.classList.toggle('active', b.dataset.depth === d);
   });
 }

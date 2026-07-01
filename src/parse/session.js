@@ -242,7 +242,7 @@ export function importSession(event) {
       renderOverlapMatrix();
       rebuildGenerationPanel();
       rebuildDebatePanel();
-      rebuildSynthesisPanel(null);
+      rebuildSynthesisPanel(lastRound?.synthesis || null);
       renderPairingsPanel();
       tc('log', S.rounds.length);
       tc('map', S.researchMap.length);

@@ -116,4 +116,18 @@ test('JSON export round-trips through import with currentRound and debate struct
   // Verify round count
   const roundCount = await page.evaluate(() => window.__rs.S.rounds.length);
   expect(roundCount).toBe(2);
+
+  // --- DOM-level assertions ---
+  // State restoring correctly is not the same as the UI rendering it —
+  // rebuildDebatePanel()/rebuildSynthesisPanel() previously threw (wrong
+  // element ID, wrong field name) or silently no-op'd (hardcoded null),
+  // leaving these panels empty despite S being fully correct. Assert on
+  // the actual rendered panels, not just internal state.
+  await expect(page.locator('#panel-deb')).toContainText('Complementary probabilistic frameworks.');
+  await expect(page.locator('#panel-syn')).toContainText('Information-theoretic constraints on grade precision emerge.');
+
+  // Provider button must reflect the imported provider, not just S.provider —
+  // setDepth() previously stripped 'active' from provider/synth buttons too
+  // (shared .depth-btn class, no data-depth attribute to distinguish them).
+  await expect(page.locator('.provider-btn[data-provider="anthropic"]')).toHaveClass(/active/);
 });

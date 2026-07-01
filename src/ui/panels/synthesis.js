@@ -5,21 +5,24 @@ import { makeRoundHdr, makeSectionLabel, mkBtn } from '../helpers.js';
 let _retrySynthesis;
 export function setRetrySynthesis(fn) { _retrySynthesis = fn; }
 
+// Mirrors runSynthesis()'s live .synth-card rendering so an imported
+// session's last synthesis is indistinguishable from a live one.
 export function rebuildSynthesisPanel(rawText) {
-  const panel = document.getElementById('panel-synth');
+  const panel = document.getElementById('panel-syn');
   panel.innerHTML = '';
   if (!rawText && !S._pendingSynthesisArgs) return;
-  const hdr = makeRoundHdr('Synthesis', S._pendingSynthesisArgs ? 'running' : 'done');
-  panel.appendChild(hdr);
   if (S._pendingSynthesisArgs) {
+    const hdr = makeRoundHdr('Synthesis', 'running');
+    panel.appendChild(hdr);
     const btn = mkBtn('↺ Retry synthesis', 'btn-accent', () => _retrySynthesis?.());
     btn.style.marginBottom = '8px';
     panel.appendChild(btn);
   }
   if (rawText) {
-    const pre = document.createElement('pre');
-    pre.className = 'synth-raw';
-    pre.textContent = rawText;
-    panel.appendChild(pre);
+    const sc = document.createElement('div');
+    sc.className = 'synth-card';
+    sc.innerHTML = `<div class="synth-hdr"><span class="synth-title">Synthesis arbitration</span><span class="badge b-done">done</span></div><div class="rcard-body" id="syn-body"></div>`;
+    sc.querySelector('#syn-body').textContent = rawText;
+    panel.appendChild(sc);
   }
 }
