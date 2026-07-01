@@ -6,15 +6,13 @@ Thanks for your interest. This document covers the architecture, known weak poin
 
 ## Running the project
 
-Open `index.html` in a browser. No build step, no server, no dependencies beyond Google Fonts. You need an API key — either Anthropic or Google Gemini (billing-enabled recommended; see README for setup). See the README for how to get one and for information on free API credit programmes.
+Install dependencies with `npm install`, then build with `npm run build`. Open `dist/index.html` in a browser, or run `npx vite preview --port 3001` to serve it locally. You need an API key — Anthropic, Google Gemini, DeepSeek, or OpenAI (billing-enabled recommended; see README for setup). See the README for how to get one and for information on free API credit programmes.
 
 ---
 
 ## Architecture in one page
 
-**Single file by design.** Everything lives in `index.html`. This is a deliberate constraint: the tool is meant to be trivially shareable and deployable from a filesystem or GitHub Pages without any infrastructure. If you feel the urge to split it into modules, that's a signal the feature is probably too complex for this tool's scope, not that the constraint should be relaxed.
-
-This constraint is worth revisiting as the codebase grows. The current size (~3,450 lines) is manageable, but further multi-provider work may push complexity to the point where a modular source tree becomes the right call. The user-facing single-file experience can be preserved even with a multi-file source tree by introducing a lightweight build step (e.g. `esbuild` or a simple concatenation script) that bundles everything into a single `index.html` for distribution. This would be an acceptable evolution if the alternative is provider logic becoming genuinely hard to navigate in a single file.
+**Modular source, single-file distribution.** The source lives in `src/` (entry point `src/main.js`) with a conventional directory layout: `src/api.js` (unified streaming entry point), `src/providers/` (one file per provider), `src/rounds/` (generation, debate, synthesis, reflection, etc.), `src/ui/` (panels, modals, settings), `src/parse/` (synthesis parser, session I/O), `src/state.js`, `src/constants.js`, `src/models.js`, `src/pricing.js`. The build step is `vite build` with `vite-plugin-singlefile`, which inlines everything — JS, CSS, fonts — into `dist/index.html`. The distributed artefact remains a single self-contained file for easy sharing and GitHub Pages deployment; the source tree is modular for maintainability. The Vite dev server (`vite --port 3001`) and preview server (`vite preview --port 3001`) serve the bundled output for local development and Playwright tests.
 
 **The brief is the primary lever.** The application is domain-agnostic. Adapting it to a new research problem means editing the brief — problem context, research context, available data — not touching the code. The agent mandates are secondary. The generation, debate, synthesis, and meta-agent machinery is fully domain-agnostic and should stay that way.
 
@@ -26,7 +24,7 @@ This constraint is worth revisiting as the codebase grows. The current size (~3,
 
 **Prefer data over text reconstruction.** Information that is knowable at the time of a structured event should be recorded as structured data at that moment, not reconstructed later by parsing or pattern-matching against text. Where a function needs to know which agents contributed to a direction, it should read that from a field on the research map entry, not re-analyse the synthesis text. This principle applies throughout: use array indices, set membership, and object references in preference to string matching wherever the same information can be maintained structurally. Reconstruction from text is slower, more fragile, and loses information that was available at the moment of production. The research map's `agents` field (`{id, round}[]` — recording which agent contributed and in which round), `debateRefs`, `parentIds` (lineage links from `EXTENDS` annotations), `summary` (`{methods, phenomenon}` parsed from the synthesis model's `SUMMARY` line), and `labelStatus` (the model's declared relationship to the existing map — `extends`, `novel`, `extends_unresolved`, etc.) are all canonical examples of this pattern.
 
-**Provider abstraction.** The tool supports multiple API providers via a clean provider abstraction layer. Gemini is the default; Anthropic remains fully available. All provider-specific logic — endpoint, auth, request format, streaming format, caching — is isolated in the `AnthropicProvider` and `GeminiProvider` objects. The unified `apiStream()` function dispatches to the active provider. Adding a third provider means: implement a provider object, add a column to `MODELS`, add `PRICING` entries, add a UI radio option. No changes elsewhere.
+**Provider abstraction via Vercel AI SDK.** The tool supports Anthropic, Google Gemini, DeepSeek, and OpenAI via the Vercel AI SDK (`ai@7`, `@ai-sdk/anthropic`, `@ai-sdk/google`, `@ai-sdk/openai`). All provider-specific logic — endpoint, auth, model routing, streaming — is isolated in `src/providers/` (one file per provider). The unified `streamAI()` function in `src/api.js` calls the SDK's `streamText()` with the model returned by `getModel(role)`. System content goes via the SDK's `instructions` parameter (not in `messages[]`). Adding a new provider means: add a file to `src/providers/`, add a column to `MODELS` in `src/models.js`, add `PRICING` entries, add a UI radio option and key input, and wire the new provider into `src/providers/index.js`. No changes elsewhere.
 
 `callParallel(fns)` is the single point where provider execution strategy diverges:
 - **Anthropic**: runs `fns[0]` alone first (writes the prompt cache), then `fns[1..N]` in `Promise.all` (reads from warm cache).
@@ -62,6 +60,8 @@ For institutional or team deployment where users should not hold their own API k
 
 **Free-tier onboarding mode** (separate issue). The recommended setup is billing-enabled Gemini. A constrained free-tier mode with lower agent counts and graceful RPD handling is tracked separately. See issue #8.
 
+**Multi-provider refactor fetch-wrapper limitation.** The `withThinkingDisabled()` fetch wrapper in `src/providers/deepseek.js` is intended to inject `thinking: {type: 'disabled'}` into DeepSeek request bodies for non-thinking roles. It is correctly wired through `createOpenAI({ fetch: wrapper })`, but the Vercel AI SDK's `serializeModelOptions()` strips non-JSON-serialisable values (including functions) from the model config, so the wrapper is silently dropped before the request is made. In practice this is harmless — `deepseek-v4-flash` defaults to non-thinking mode — but the explicit injection does not reach the wire. If a future DeepSeek model defaults to thinking mode, the wrapper approach will need to be replaced (e.g. with AI SDK middleware or a server-side proxy).
+
 ---
 
 ## What good contributions look like
@@ -76,9 +76,8 @@ For institutional or team deployment where users should not hold their own API k
 
 ## What to avoid
 
-- Splitting into multiple files without a strong architectural reason.
 - Adding server-side components.
-- Adding dependencies (npm packages, CDN scripts beyond Google Fonts).
+- Adding CDN scripts or new npm packages without a strong reason — the existing AI SDK covers provider needs.
 - Storing API keys anywhere other than the in-memory input field.
 - Prompt changes that break the cached brief block invariant silently.
 - Provider-specific logic (caching, auth, request format) outside the provider abstraction layer.

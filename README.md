@@ -1,6 +1,6 @@
 # Research Swarm
 
-Research Swarm is a multi-agent AI framework for prototyping theoretical research directions. Specialist agents with distinct disciplinary mandates generate, debate, and synthesise research angles on a problem in parallel — with full researcher control over the brief, roster, debate pairings, and cost. The entire tool runs as a single HTML file opened directly in the browser: no server, no build step, no package manager, no GPU.
+Research Swarm is a multi-agent AI framework for prototyping theoretical research directions. Specialist agents with distinct disciplinary mandates generate, debate, and synthesise research angles on a problem in parallel — with full researcher control over the brief, roster, debate pairings, and cost. The distributed tool is a single self-contained HTML file opened directly in the browser: no server, no package manager to install, no GPU.
 
 Originally built to study the dynamics of community rock climb difficulty grading systems, but fully generalisable to any research domain by editing the brief and agent mandates.
 
@@ -146,19 +146,25 @@ If you prefer to run the tool locally or want to modify the code:
    cd research-swarm
    ```
 
-2. Open `index.html` directly in your browser:
+2. Install dependencies and build the single-file bundle:
    ```bash
-   open index.html          # macOS
-   xdg-open index.html      # Linux
-   start index.html         # Windows
+   npm install
+   npm run build
    ```
-   Or drag the file into your browser window.
 
-3. Select your API provider in the sidebar and enter the corresponding key:
+3. Open the built file directly in your browser:
+   ```bash
+   open dist/index.html          # macOS
+   xdg-open dist/index.html      # Linux
+   start dist/index.html         # Windows
+   ```
+   Or run `npm run dev` for a live-reloading dev server instead — useful while editing source under `src/`. Note that the source `index.html` in the repo root is a thin shell that loads ES modules from `src/`; it only works when served over `http(s)` (via `npm run dev`, `npm run build && npx vite preview`, or a static host) — opening it directly (`file://`) will not work, since browsers block module imports from the local filesystem. Always use the built `dist/index.html` for direct file access.
+
+4. Select your API provider in the sidebar and enter the corresponding key:
    - **Google Gemini** (default): get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
    - **Anthropic**: get a key at [console.anthropic.com](https://console.anthropic.com) (requires billing)
 
-There is no npm install, no server to run, and no environment variables to configure.
+No environment variables are needed — API keys are entered directly in the sidebar.
 
 ### Getting an API key
 
@@ -193,7 +199,7 @@ The interface is divided into a **sidebar** (always visible) and a **main panel*
 | **Provider** | Gemini (default) or Anthropic — radio selector + key field |
 | **Session cost** | Live cost tracker with cache hit rate |
 | **Agents** | Agent list with status, edit, and delete controls |
-| **Synthesis model** | Sonnet / Opus toggle (Anthropic only) |
+| **Synthesis model** | Standard / Premium toggle (hidden for Gemini) |
 | **Depth** | Brief (default) / Detailed / Exhaustive output length |
 | **Reflection round** | Enable / disable the two-call reflection pipeline after each debate round |
 | **Run button** | Launches the generation round |
@@ -695,11 +701,13 @@ After the first round, the generation button only runs agents with no existing o
 
 ## Architecture
 
-The entire application is a single HTML file with no external dependencies beyond:
-- Google Fonts (DM Mono, Instrument Serif) — loaded from `fonts.googleapis.com`
-- The active API provider — either the Anthropic API (using the `anthropic-dangerous-direct-browser-access: true` header) or the Google Gemini API (key sent as a URL query parameter)
+**Modular source, single-file distribution.** The source lives in `src/` (entry point `src/main.js`), organised into providers, round runners, parsers, and UI modules — see CONTRIBUTING.md for the full layout. `npm run build` (Vite + `vite-plugin-singlefile`) inlines all JS, CSS, and assets into a single self-contained `dist/index.html`, which is what gets deployed and what you'd open directly from the filesystem. There is no server-side component; all state is held in memory in the browser tab.
 
-There is no build step, no bundler, no package manager, and no server-side component. All state is held in memory in the browser tab. The application can be served from a local filesystem, a static file host, or GitHub Pages.
+External dependencies at runtime are limited to:
+- Google Fonts (DM Mono, Instrument Serif) — loaded from `fonts.googleapis.com`
+- The active API provider's endpoint — Anthropic (`anthropic-dangerous-direct-browser-access: true` header), Google Gemini (key sent as a URL query parameter), DeepSeek, or OpenAI, depending on what's selected in the sidebar
+
+The live site at [dboocock.github.io/research-swarm](https://dboocock.github.io/research-swarm/) serves the built `dist/index.html`.
 
 ### API calls made during a session
 

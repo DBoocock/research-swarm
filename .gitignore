@@ -14,9 +14,14 @@ Thumbs.db
 *~
 *#
 
+# Build
+node_modules/
+dist/
+test-results/
+
 # Output
 output/
-examples/debug*
+examples/*debug*
 
 # Docs
 literature/
