@@ -67,8 +67,11 @@ export function addUsage(name, u, model) {
   costS.inp += i; costS.out += o; costS.cw += cw; costS.cr += cr;
   // P.* are $ per million tokens (see src/generated/pricing.js) — divide by 1e6 for $.
   const c = (i*P.inp + o*P.out + cw*P.cw + cr*P.cr) / 1e6;
-  const isAnthropic = (S.provider || 'gemini') === 'anthropic';
-  const wc = isAnthropic ? ((i + cr)*P.inp + o*P.out + cw*P.inp) / 1e6 : c;
+  // "Saved" compares actual cost to the no-caching counterfactual: cache reads
+  // and writes billed as plain input tokens instead. Provider-agnostic — for
+  // providers with no caching (cw and cr always 0) this collapses to wc === c,
+  // so saved is naturally 0 without needing a per-provider branch.
+  const wc = ((i + cr)*P.inp + o*P.out + cw*P.inp) / 1e6;
   costS.total += c;
   costS.saved += Math.max(0, wc - c);
   costS.callCount = (costS.callCount || 0) + 1;
