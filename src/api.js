@@ -65,9 +65,10 @@ export function addUsage(name, u, model) {
   const P  = priceFor(model);
 
   costS.inp += i; costS.out += o; costS.cw += cw; costS.cr += cr;
-  const c = i*P.inp + o*P.out + cw*P.cw + cr*P.cr;
+  // P.* are $ per million tokens (see src/generated/pricing.js) — divide by 1e6 for $.
+  const c = (i*P.inp + o*P.out + cw*P.cw + cr*P.cr) / 1e6;
   const isAnthropic = (S.provider || 'gemini') === 'anthropic';
-  const wc = isAnthropic ? ((i + cr)*P.inp + o*P.out + cw*P.inp) : c;
+  const wc = isAnthropic ? ((i + cr)*P.inp + o*P.out + cw*P.inp) / 1e6 : c;
   costS.total += c;
   costS.saved += Math.max(0, wc - c);
   costS.callCount = (costS.callCount || 0) + 1;
@@ -109,7 +110,7 @@ export async function streamAI({ name, role, systemBlocks, systemString, message
     model,
     ...(instructions !== undefined ? { instructions } : {}),
     messages,
-    maxTokens: maxTokensOverride ?? MAX_TOKENS[role] ?? 1200,
+    maxOutputTokens: maxTokensOverride ?? MAX_TOKENS[role] ?? 1200,
     maxRetries: 3,
     abortSignal: signal,
     ...(providerOptions ? { providerOptions } : {}),
