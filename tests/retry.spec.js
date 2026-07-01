@@ -78,8 +78,10 @@ test('retry button appears after synthesis failure and succeeds on click', async
   // Click the retry button — must succeed
   await retryBtn.click();
 
-  // Wait for synthesis to complete (run-btn re-enabled, map populated)
-  await page.waitForFunction(() => window.__rs.S.researchMap.length > 0, { timeout: 15000 });
+  // Wait for synthesis to fully settle — _pendingSynthesisArgs is cleared last,
+  // after attribution and the meta-agent call both resolve, so it's the only
+  // reliable "done" signal (researchMap fills in earlier, mid-flight).
+  await page.waitForFunction(() => window.__rs.S._pendingSynthesisArgs === null, { timeout: 15000 });
 
   const mapLen = await page.evaluate(() => window.__rs.S.researchMap.length);
   expect(mapLen).toBeGreaterThan(0);
