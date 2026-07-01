@@ -21,6 +21,7 @@ export function buildExportData() {
     reflectionsEnabled: S.reflectionsEnabled,
     depth: S.depth,
     synthesisModel: S.synthesisModel,
+    deepseekThinking: S.deepseekThinking,
     currentRound: S.currentRound,
     selectedAgents: [...S.selectedAgents],
     agentMandates: Object.fromEntries(agents.map(a => [a.id, {
@@ -234,6 +235,11 @@ export function importSession(event) {
         S.reflectionsEnabled = data.reflectionsEnabled;
         const tog = document.getElementById('reflection-toggle');
         if (tog) tog.checked = S.reflectionsEnabled;
+      }
+      if (typeof data.deepseekThinking === 'boolean') {
+        S.deepseekThinking = data.deepseekThinking;
+        const dsTog = document.getElementById('deepseek-thinking-toggle');
+        if (dsTog) dsTog.checked = S.deepseekThinking;
       }
       S.currentRound = data.currentRound;
       const lastRound = data.rounds && data.rounds.length ? data.rounds[data.rounds.length - 1] : null;

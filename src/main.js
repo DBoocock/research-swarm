@@ -86,6 +86,13 @@ if (refTog) {
   refTog.checked = S.reflectionsEnabled;
 }
 
+// ── DeepSeek reasoning toggle ────────────────────────────────
+const dsThinkTog = document.getElementById('deepseek-thinking-toggle');
+if (dsThinkTog) {
+  dsThinkTog.addEventListener('change', () => { S.deepseekThinking = dsThinkTog.checked; });
+  dsThinkTog.checked = S.deepseekThinking;
+}
+
 // ── Import file input ───────────────────────────────────────
 document.getElementById('import-file')?.addEventListener('change', importSession);
 document.getElementById('import-trigger-btn')?.addEventListener('click', () => document.getElementById('import-file')?.click());

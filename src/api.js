@@ -1,9 +1,9 @@
 import { streamText } from 'ai';
 import { S, brief, costS } from './state.js';
-import { modelFor } from './models.js';
+import { modelFor, isThinkingRole } from './models.js';
 import { priceFor } from './pricing.js';
 import { getModel, getCallProviderOptions } from './providers/index.js';
-import { MAX_TOKENS } from './constants.js';
+import { MAX_TOKENS, DEEPSEEK_REASONING_HEADROOM } from './constants.js';
 import { renderCost } from './ui/cost.js';
 
 // ── Brief block builders ────────────────────────────────────────────────────
@@ -109,11 +109,15 @@ export async function streamAI({ name, role, systemBlocks, systemString, message
   const providerOptions = getCallProviderOptions(role);
   const instructions   = buildInstructions(systemBlocks, systemString);
 
+  const reasoningHeadroom =
+    (S.provider === 'deepseek' && S.deepseekThinking && isThinkingRole(role))
+      ? DEEPSEEK_REASONING_HEADROOM : 0;
+
   const result = streamText({
     model,
     ...(instructions !== undefined ? { instructions } : {}),
     messages,
-    maxOutputTokens: maxTokensOverride ?? MAX_TOKENS[role] ?? 1200,
+    maxOutputTokens: (maxTokensOverride ?? MAX_TOKENS[role] ?? 1200) + reasoningHeadroom,
     maxRetries: 3,
     abortSignal: signal,
     ...(providerOptions ? { providerOptions } : {}),

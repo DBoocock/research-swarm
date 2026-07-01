@@ -26,12 +26,22 @@ export function sseWrap(text, inputTokens = 100, outputTokens = 10) {
   ].join('\n');
 }
 
-/** Infer the call role from the Anthropic request body. */
+/** Infer the call role from the request body (Anthropic's body.system, or an
+ * OpenAI-compatible body.messages[] with a leading role:'system' entry — used
+ * by the DeepSeek/OpenAI providers). */
 export function inferRole(body) {
-  const systemParts = Array.isArray(body.system)
-    ? body.system.map(b => b.text || '').join(' ')
-    : (typeof body.system === 'string' ? body.system : '');
-  const userContent = body.messages?.[0]?.content ?? '';
+  const hasOpenAiSystemMsg = Array.isArray(body.messages) && body.messages[0]?.role === 'system';
+
+  const systemParts = hasOpenAiSystemMsg
+    ? String(body.messages[0].content ?? '')
+    : Array.isArray(body.system)
+      ? body.system.map(b => b.text || '').join(' ')
+      : (typeof body.system === 'string' ? body.system : '');
+
+  const userMsg = hasOpenAiSystemMsg
+    ? body.messages.find(m => m.role === 'user')
+    : body.messages?.[0];
+  const userContent = userMsg?.content ?? '';
   const userText = Array.isArray(userContent)
     ? userContent.map(b => b.text || '').join(' ')
     : String(userContent);

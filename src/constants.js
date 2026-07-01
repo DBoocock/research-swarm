@@ -29,6 +29,12 @@ export const DEPTH_DIRS = {
 
 export const DEPTH_WORDS = { brief: 150, detailed: 250, exhaustive: 400 };
 
+// Extra maxOutputTokens headroom for DeepSeek synthesis/meta calls when the
+// "DeepSeek reasoning" toggle is on — reasoning tokens share the same output
+// budget as visible content, so without this headroom reasoning exhausts the
+// budget before any answer text is emitted (see issue #31).
+export const DEEPSEEK_REASONING_HEADROOM = 8000;
+
 export const MAX_TOKENS = {
   synthesis:    1500,
   meta:         1500,

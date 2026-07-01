@@ -16,6 +16,7 @@ export const S = {
   apiKeys: { anthropic: '', gemini: '', deepseek: '', openai: '' },
   depth: 'brief',
   synthesisModel: 'sonnet',
+  deepseekThinking: false,
   cumulativeCostBaseline: 0,
   selectedAgents: new Set(DEFAULT_AGENTS.map(a => a.id)),
   agentStatuses: Object.fromEntries(DEFAULT_AGENTS.map(a => [a.id, 'active'])),

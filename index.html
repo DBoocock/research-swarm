@@ -401,6 +401,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
     <div style="font-size:9px;color:var(--text3);margin-top:4px;line-height:1.4;">Applies to synthesis, meta-agent &amp; roster. Premium costs several times more per call but reasons more deeply.</div>
   </div>
 
+  <div class="sidebar-section" id="deepseek-thinking-section" style="display:none;">
+    <div class="ss-hdr"><span>DeepSeek reasoning</span></div>
+    <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11px;color:var(--text2);padding:1px 0;">
+      <input type="checkbox" id="deepseek-thinking-toggle"
+        style="accent-color:var(--accent2);width:13px;height:13px;">
+      enable for synthesis &amp; meta-agent
+    </label>
+    <div style="font-size:9px;color:var(--text3);margin-top:4px;line-height:1.4;">Experimental — evaluating reasoning quality for these two roles. Uses a much larger token budget per call to leave room for a visible answer after reasoning.</div>
+  </div>
+
   <div class="sidebar-section">
     <div class="ss-hdr"><span>Depth</span></div>
     <div class="depth-row">

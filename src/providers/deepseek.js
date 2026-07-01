@@ -39,7 +39,7 @@ function refreshProviders(key) {
 export function makeDeepSeekModel(role) {
   const key = S.apiKeys.deepseek;
   refreshProviders(key);
-  const provider = isThinkingRole(role) ? _providerThink : _providerNoThink;
+  const provider = (isThinkingRole(role) && S.deepseekThinking) ? _providerThink : _providerNoThink;
   return provider.chat(modelFor(role));
 }
 
